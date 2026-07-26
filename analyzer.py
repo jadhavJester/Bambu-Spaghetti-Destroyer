@@ -1444,6 +1444,12 @@ def make_preset(r: dict, name: str = "OPT", mode: str = "balanced",
     # ABS/ASA/PC/PA + moi loai soi gia cuong CF/GF (PLA-CF, PET-CF, PA-CF...). TPU thi
     # NGUOC lai (brim hep). warpy chi dung cho draft_shield (rieng ABS/ASA khung ho).
     brim_prone = warpy or fam in ("PC", "PA", "PET") or "CF" in body or "GF" in body
+    # PETG: KHONG co ngot manh nhu ABS, nhung GOC NHON o mep de hot len roi BUNG BAN giua
+    # chung. Forum Bambu "PETG first layer issues": "PETG prints with sharp periphery
+    # corners on the build plate are prone to become detached - use a brim on the periphery
+    # or at least mouse ears"; chinh chu topic chot lai "I solved adhesion problem with
+    # brim". => PETG KHONG BAO GIO de no-brim, du day rong va ti le lat an toan.
+    is_petg = fam == "PETG"
 
     # 3) SUPPORT — tu nhan dinh theo dien tich hang THAT, khong theo cam tinh
     ov = m.get("overhang_pct", 0)
@@ -1619,7 +1625,7 @@ def make_preset(r: dict, name: str = "OPT", mode: str = "balanced",
                       "(3) bàn 65°C." if thin_frame
                       else " Brim neo mép xuống bàn (giá đo +1.9% thời gian/nhựa). Triệt để: úp mặt "
                       "phẳng nhất xuống bàn."))
-    elif bed >= 20 and ratio <= 3 and not brim_prone:
+    elif bed >= 20 and ratio <= 3 and not brim_prone and not is_petg:
         p["brim_type"] = "no_brim"
         p["brim_width"] = "0"
         why.append(f"KHÔNG brim: đáy rộng {bed} cm² (cạnh ~{side:.0f}mm) so với cao {h_mm}mm "
@@ -1633,7 +1639,11 @@ def make_preset(r: dict, name: str = "OPT", mode: str = "balanced",
         why.append(f"Brim 5mm: đáy {bed} cm², tỉ lệ lật {ratio:.1f}"
                    + (f" — nhựa {body} ứng suất nhiệt cao/co ngót, dễ vênh mép nên brim dù đáy rộng "
                       f"(wiki Bambu auto-brim: PC/ABS/ASA/CF cần brim rộng hơn)."
-                      if brim_prone else " — bám thêm cho chắc (giá đo thật: +1.9% thời gian/nhựa)."))
+                      if brim_prone else (" — PETG: góc nhọn ở mép rất hay hớt lên rồi BUNG BÀN "
+                      "giữa chừng (forum Bambu), nên GIỮ brim kể cả khi đáy rộng + tỉ lệ lật an "
+                      "toàn. Kèm: lau bàn cồn ≥70% trước mỗi lần in (mẹo được kiểm chứng nhiều "
+                      "nhất cho PETG trên PEI)." if is_petg
+                      else " — bám thêm cho chắc (giá đo thật: +1.9% thời gian/nhựa).")))
     else:
         p["brim_type"] = "outer_only"
         p["brim_width"] = "8"
@@ -1978,6 +1988,8 @@ FILAMENT_REF = {
                   "note": "SỢI CARBON mài mòn nozzle đồng → cần nozzle THÉP CỨNG; tích cặn → cold pull thường xuyên."},
     "PETG":      {"temp": "245°C", "flow": 21, "level": "warn",
                   "note": "DÍNH nozzle → nhựa bám đầu phun quẹt vào model gây LỆCH TRỤC (bật Prime tower). Hút ẩm mạnh → sấy 65°C. Bàn 70-80°C."},
+    "PETG ECO":  {"temp": "240°C (hãng 230-260)", "flow": 14, "level": "warn",
+                  "note": "TINMORRY PETG-Eco: bàn 75-90°C (nóng hơn PETG Bambu). Cuộn eco KHÔNG chạy nhanh được — người dùng PETG-Eco trên forum Bambu phải hạ tốc <100mm/s + mvs 14. Hút ẩm mạnh → SẤY, không sấy là TƠ SỢI."},
     "PETG BASIC":{"temp": "245°C", "flow": 8,  "level": "warn",
                   "note": "Flow thấp (8 mm³/s) → tốc phải chậm, vượt là kẹt/under-extrude. Dính nozzle → Prime tower chống lệch."},
     "ABS":       {"temp": "270°C", "flow": 29, "level": "warn",
@@ -2045,6 +2057,16 @@ FIL_EXPORT = {
                            "filament_flow_ratio": "0.98", "hot_plate_temp": "65"},
                   "why": "Bien the PLA la — CHU DICH ha mvs 21→16 than trong (official Basic 21); "
                          "ban 65 theo official A1."},
+    "PETG ECO":  {"inherits": "Bambu PETG Basic @BBL A1", "verified": True,   # TINMORRY eco
+                  "safe": {"nozzle_temperature": "240", "filament_max_volumetric_speed": "14",
+                           "filament_flow_ratio": "0.94", "hot_plate_temp": "80",
+                           "filament_retraction_length": "1.2", "filament_retraction_speed": "30"},
+                  "why": "TINMORRY PETG-Eco. Hang cong bo voi 230-260°C, ban 75-90°C; cong dong "
+                         "Bambu chot 230/ban 80 -> lay 240 (giua khoang, an toan cho A1) + ban 80. "
+                         "mvs 14 lay DUNG tu nguoi dung PETG-Eco that tren forum Bambu ('slow down "
+                         "the speed <100mm/s and the maximum volumetric speed to 14'). Ke thua PETG "
+                         "Basic (KHONG phai HF — cuon eco gia re khong dun nhanh duoc). Retraction "
+                         "1.2mm@30mm/s chong keo soi."},
     "PETG BASIC":{"inherits": "Bambu PETG Basic @BBL A1", "verified": True,  # ✓ template
                   "safe": {"nozzle_temperature": "245", "filament_max_volumetric_speed": "13",
                            "filament_flow_ratio": "0.94", "hot_plate_temp": "70",

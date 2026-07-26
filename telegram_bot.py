@@ -90,6 +90,16 @@ def _send_photo(token: str, chat: str, jpg: bytes, caption: str = "") -> None:
     urllib.request.urlopen(req, timeout=30).read()
 
 
+def _sig(answer: str | None, fallback: str) -> str:
+    """Gan TEN MODEL duoi cau tra loi (user yeu cau 2026-07-22). Chuoi fallback nhieu
+    model nen khong doan truoc duoc con nao thuc su tra loi — hien ra de biet dang xai
+    model gi, mien phi hay dang tieu tien."""
+    if not answer:
+        return fallback
+    m = ai_chat.LAST_MODEL or "?"
+    return f"{answer}\n\n— 🤖 {m} ({'miễn phí' if m.endswith(':free') else 'trả phí'})"
+
+
 def _images(hooks: dict) -> list[bytes]:
     """Anh cho AI vision: [camera that, render model] — cai nao co thi lay."""
     out = []
@@ -191,13 +201,13 @@ def _handle(token: str, chat: str, text: str, hooks: dict) -> None:  # noqa: PLR
             if imgs:
                 a = ai_chat.ask_vision(
                     t + "\n(Ảnh 1 = camera bàn in thật; ảnh 2 nếu có = render model.)",
-                    imgs, context=hooks["status"]()) \
-                    or "AI vision không phản hồi — thử lại sau."
-                _send(token, chat, a, html=False)
+                    imgs, context=hooks["status"]())
+                _send(token, chat, _sig(a, "AI vision không phản hồi — thử lại sau."),
+                      html=False)
                 return
-        a = ai_chat.ask(t, context=hooks["status"]() + "\n" + hooks["temps"]()) \
-            or "AI không phản hồi (model free có thể hết lượt hôm nay) — thử lại sau."
-        _send(token, chat, a, html=False)
+        a = ai_chat.ask(t, context=hooks["status"]() + "\n" + hooks["temps"]())
+        _send(token, chat, _sig(a, "AI không phản hồi (model free có thể hết lượt hôm "
+                                   "nay) — thử lại sau."), html=False)
 
 
 def _handle_safe(token: str, chat: str, text: str, hooks: dict) -> None:
@@ -231,21 +241,36 @@ def _register_commands(token: str) -> None:
         pass
 
 
+LAST_POLL = 0.0     # luc poll thanh cong gan nhat — de biet luong poll con song
+
+
 def loop(hooks: dict) -> None:
     """Thread nen: long-poll getUpdates; moi tin xu ly o thread rieng (vision cham)."""
+    global LAST_POLL                                         # noqa: PLW0603
     offset = 0
     registered = False
+    hb = 0.0
     while True:
-        token, me = _cfg()
-        if not token or not me:
-            time.sleep(30)
-            continue
-        if not registered:
-            _register_commands(token)
-            registered = True
+        # BUG THAT (user 2026-07-22 "ngon ngu tu nhien chua hoat dong"): TRUOC day
+        # _cfg() va _register_commands() nam NGOAI try. Chi can MOT lan doc .env loi
+        # hoac mang chet la exception thoat khoi loop() -> luong poll CHET VINH VIEN,
+        # khong log, khong hoi am. Do la ly do that: khong phai AI, khong phai routing
+        # (da do: ai_chat.ask tra loi 4.8s; getUpdates tu ngoai KHONG bi 409 Conflict
+        # => chung minh khong con ai poll). Gio BOC TOAN BO than vong lap.
         try:
+            token, me = _cfg()
+            if not token or not me:
+                time.sleep(30)
+                continue
+            if not registered:
+                _register_commands(token)
+                registered = True
             r = _api(token, "getUpdates",
                      {"timeout": 50, "offset": offset, "allowed_updates": ["message"]})
+            LAST_POLL = time.time()
+            if LAST_POLL - hb > 1800:            # nhip tim 30'/lan: log de biet con song
+                hb = LAST_POLL
+                notify._log(f"[bot] poll song (offset={offset})")   # noqa: SLF001
             for u in r.get("result", []):
                 offset = max(offset, u["update_id"] + 1)
                 m = u.get("message") or {}
@@ -261,5 +286,18 @@ def loop(hooks: dict) -> None:
             time.sleep(5)
 
 
+def _supervise(hooks: dict) -> None:
+    """Canh loop(): no thoat hay chet vi BAT KY ly do gi cung BAT LAI sau 10s.
+    Bot im ru la loi ton tien nhat cua hub — mat het canh bao khi ban in dang hong."""
+    while True:
+        try:
+            loop(hooks)
+            notify._log("[bot] loop() thoat bat ngo — bat lai sau 10s")   # noqa: SLF001
+        except BaseException as e:                           # noqa: BLE001
+            notify._log(f"[bot] loop() CHET: {type(e).__name__}: "        # noqa: SLF001
+                        f"{str(e)[:200]} — bat lai sau 10s")
+        time.sleep(10)
+
+
 def start(hooks: dict) -> None:
-    threading.Thread(target=loop, args=(hooks,), daemon=True).start()
+    threading.Thread(target=_supervise, args=(hooks,), daemon=True).start()

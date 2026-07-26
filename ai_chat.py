@@ -46,6 +46,10 @@ def _counts() -> dict:
 
 DEFAULT_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 
+# Model THUC SU tra loi lan gan nhat (chuoi fallback nen khong doan duoc truoc).
+# Bot Telegram in kem duoi cau tra loi de biet dang xai model nao, free hay tra tien.
+LAST_MODEL = ""
+
 # Gia THAT 1 cau hoi cua hub. Tinh: system prompt ~3130 token (bang nhua + dac tinh
 # + vat cao + vi tri option + nguong hinh hoc + ma HMS — rut tu analyzer/bambu_web)
 # + cau hoi ~60 + tra loi ~120. Bang gia OpenRouter 2026-07-17. Dung cho /usage.
@@ -221,6 +225,8 @@ def ask(question: str, context: str = "", system: str = SYSTEM,
     for m in _chain(model):
         out = _call(m, key, msgs, max_tokens, timeout)
         if out:
+            global LAST_MODEL                               # noqa: PLW0603
+            LAST_MODEL = m
             _count("chat")
             if not m.endswith(":free"):
                 _count("chat_paid")
@@ -253,6 +259,8 @@ def ask_vision(question: str, images: list[bytes], context: str = "",
     for m in _chain(model, vision=True):                # vision free -> paid co vision
         out = _call(m, key, msgs, max_tokens, timeout)
         if out:
+            global LAST_MODEL                               # noqa: PLW0603
+            LAST_MODEL = m
             _count("vision")
             if not m.endswith(":free"):
                 _count("vision_paid")
