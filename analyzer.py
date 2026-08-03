@@ -1382,7 +1382,9 @@ def _guide_reason(key: str, val: str, r: dict, lh: float = 0.2) -> str:
         "top_shell_layers": lambda: f"{val} lớp ≈ {float(val)*lh:.2f}mm ≥1mm → chống pillowing/lỗ mặt trên",
         "top_shell_thickness": lambda: "chốt chặn 1mm: slicer tự thêm lớp nếu mỏng hơn",
         "bottom_shell_layers": lambda: f"{val} lớp đáy ≈ 0.8mm kín đáy",
-        "top_surface_pattern": lambda: "monotonic line: đường song song đều → mặt trên mịn nhất",
+        "top_surface_pattern": lambda: ("monotonic line (mặc định Bambu): đường song song đều → "
+                                        "mặt trên mịn. Nếu CÒN sọc dọc dù đã hạ tốc top → đổi sang "
+                                        "'monotonic' (cộng đồng: đều hơn cho vài ca)"),
         "sparse_infill_density": lambda: f"{val} theo chế độ (đủ đỡ mặt trên, ít nhựa)",
         "sparse_infill_pattern": lambda: ("Gyroid: đều mọi hướng, đẹp nếu lộ" if val == "gyroid"
                                           else "Adaptive Cubic: dày gần vỏ, thưa giữa → nhanh"),
