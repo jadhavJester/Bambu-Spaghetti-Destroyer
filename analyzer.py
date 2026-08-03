@@ -13,6 +13,7 @@ Dong hoa nhung gi da lam thu cong cho makep.3mf:
 """
 from __future__ import annotations
 
+import heapq
 import json
 import math
 import re
@@ -22,7 +23,8 @@ COS45 = math.cos(math.radians(45))
 BED_EPS = 0.3          # mm — coi nhu dang nam tren ban
 MIN_BED_CM2 = 5.0      # duoi nguong nay lop dau kho bam (canh vuong <22mm)
 VLH_WARN_LAYERS = 20   # variable layer height cong them qua nguong nay moi dang canh bao
-ROT_MAX_TRIS = 200_000  # tren nguong nay bo quet xoay (10 vong O(n) thuan Python ~>60s)
+ROT_MAX_TRIS = 200_000  # tren nguong nay KHONG quet full — RUT GON (decimate) roi quet
+ROT_SCAN_TRIS = 60_000  # so mat GIU LAI de quet xoay/preview khi mesh lon (giu dang, ~vai giay)
 
 
 # ---------- doc mesh 3mf (co ap transform) ----------
@@ -296,6 +298,25 @@ def mesh_stats(tris: list) -> dict:
         "over_band_pct": [round(x / over * 100) if over else 0 for x in over_band],
         "over_top_frac": top_frac,   # ti le overhang o 1/3 TREN — cao = "hong o 2/3-3/3"
     }
+
+
+def _decimate(tris: list, tri_hex: list | None, target: int) -> tuple:
+    """Giu `target` tam giac DIEN TICH LON NHAT (giu dang tong the) + tri_hex song song.
+    Dung cho quet xoay/preview khi mesh qua lon de khong treo — dims/overhang/support THAT
+    van tinh tren mesh DAY DU (mesh_stats), day chi la mesh xap xi de VE + xep hang huong."""
+    if len(tris) <= target:
+        return tris, tri_hex
+    have_hex = bool(tri_hex) and len(tri_hex) == len(tris)
+    a2 = []                                          # (dien_tich^2, index) — khoi sqrt
+    for i, (p, q, r) in enumerate(tris):
+        ux, uy, uz = q[0]-p[0], q[1]-p[1], q[2]-p[2]
+        vx, vy, vz = r[0]-p[0], r[1]-p[1], r[2]-p[2]
+        nx, ny, nz = uy*vz-uz*vy, uz*vx-ux*vz, ux*vy-uy*vx
+        a2.append((nx*nx + ny*ny + nz*nz, i))
+    keep = sorted(i for _, i in heapq.nlargest(target, a2))
+    dt = [tris[i] for i in keep]
+    dh = [tri_hex[i] for i in keep] if have_hex else None
+    return dt, dh
 
 
 def try_rotations(tris: list, x_angles=(-60, -45, -30, -15, 0, 15, 30, 45, 90, 180),
@@ -714,14 +735,21 @@ def analyze_3mf(path: str, color: str | None = None, plate: int | None = None) -
             if len(tris) <= ROT_MAX_TRIS:
                 res["bridges"] = ceiling_bridges(tris)
                 res["thin"] = thin_walls(tris)
-            if len(tris) <= ROT_MAX_TRIS:
-                res["rotations"] = try_rotations(tris)
-                # anh xoay TO mau THEO PART (than xam PETG + nap cam PLA); vat 1 mau ->
-                # p_col (mau chinh khay, den cho khay 2) hoac AMS that.
-                res["rot_preview"] = rot_preview(tris, res["rotations"], p_col or color,
-                                                 tri_hex=(_tri_hex if len(_tri_hex) == len(tris) else None))
-            else:
-                res["tips"].append(f"Mesh {len(tris):,} tam giác vượt ngưỡng {ROT_MAX_TRIS:,} — bỏ quét xoay để không treo server.")
+            # QUET XOAY + PREVIEW: mesh qua lon thi RUT GON con ROT_SCAN_TRIS mat lon nhat
+            # (giu dang tong the) roi moi quet — KHONG bo han nhu truoc. dims/overhang/
+            # support THAT van tinh tren mesh DAY DU o mesh_stats.
+            _hex = _tri_hex if len(_tri_hex) == len(tris) else None
+            if len(tris) <= ROT_MAX_TRIS:            # <=200K: quet FULL nhu cu (khong doi)
+                _rt, _rh = tris, _hex
+            else:                                    # >200K: rut gon roi quet (truoc BO han)
+                _rt, _rh = _decimate(tris, _hex, ROT_SCAN_TRIS)
+                res["tips"].append(
+                    f"Mesh {len(tris):,} tam giác — rút gọn còn {len(_rt):,} mặt lớn nhất để "
+                    "vẽ ảnh xoay/preview (kích thước, overhang & support vẫn tính trên mesh đầy đủ).")
+            # anh xoay TO mau THEO PART (than xam PETG + nap cam PLA); vat 1 mau ->
+            # p_col (mau chinh khay, den cho khay 2) hoac AMS that.
+            res["rotations"] = try_rotations(_rt)
+            res["rot_preview"] = rot_preview(_rt, res["rotations"], p_col or color, tri_hex=_rh)
 
         nominal = float(cfg.get("layer_height") or 0.2)
         h = res.get("mesh", {}).get("height") or 0
@@ -747,11 +775,17 @@ def analyze_stl(path: str, color: str | None = None) -> dict:
     if len(tris) <= ROT_MAX_TRIS:
         res["bridges"] = ceiling_bridges(tris)
         res["thin"] = thin_walls(tris)
-    if len(tris) <= ROT_MAX_TRIS:
-        res["rotations"] = try_rotations(tris)
-        res["rot_preview"] = rot_preview(tris, res["rotations"], color)
-    else:
-        res["tips"].append(f"Mesh {len(tris):,} tam giác vượt ngưỡng {ROT_MAX_TRIS:,} — bỏ quét xoay để không treo server.")
+    # mesh qua lon -> RUT GON con ROT_SCAN_TRIS mat lon nhat de quet xoay/preview
+    # (dims/support that van tren mesh day du o mesh_stats phia tren).
+    if len(tris) <= ROT_MAX_TRIS:                    # <=200K: quet FULL nhu cu (khong doi)
+        _rt = tris
+    else:                                            # >200K: rut gon roi quet (truoc BO han)
+        _rt, _ = _decimate(tris, None, ROT_SCAN_TRIS)
+        res["tips"].append(
+            f"Mesh {len(tris):,} tam giác — rút gọn còn {len(_rt):,} mặt lớn nhất để "
+            "vẽ ảnh xoay/preview (kích thước, overhang & support vẫn tính trên mesh đầy đủ).")
+    res["rotations"] = try_rotations(_rt)
+    res["rot_preview"] = rot_preview(_rt, res["rotations"], color)
     _advise(res)
     return res
 
