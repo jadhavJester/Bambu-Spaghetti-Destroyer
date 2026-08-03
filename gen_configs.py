@@ -86,8 +86,11 @@ LP_QuocDan\\
 | PETG\\LP_PETG_FILAMENT     | 240 | 80 | 14 | 0.94 | **1.2/30** |
 
 ## 2.Process_Base — support TẮT
-Chung: mặt trên chống sọc top_surface ≤60% trần chảy (PLA Lite **149** · Matte **85** · PETG **100**) · monotonic line · lw 0.42 · ≥5 lớp top (≥1mm) · tường 3 · Arachne.
-- `_DEFAUT` base sạch · `_DEFAUT_IRONING` bật ủi (top · flow 25% · spacing 0.1 · speed 30). *PETG ủi dễ tơ — cân nhắc.*
+**MẶT ĐẸP KHÔNG CẦN IRONING** (base `_DEFAUT` đã đạt nhờ 6 lever, ironing chỉ là đánh bóng THÊM, không bắt buộc):
+① top_surface ≤60% trần chảy (PLA Lite **149** · Matte **85** · PETG **100** mm/s — line liền, KHÔNG sọc) · ② monotonic line · ③ top line width 0.42 · ④ ≥5 lớp top + chốt 1mm (chống pillowing) · ⑤ ruột 15% (top không võng) · ⑥ tường 3 + Arachne. *Thiếu đều thật thì calib Flow Ratio + PA.*
+- `_DEFAUT` = mặt đẹp không ironing.
+- `_DEFAUT_IRONING` = bật ủi thêm cho bóng: `ironing_type = top` (Studio hiện **"Top surfaces"** dưới **Quality ▸ Ironing** — KHÔNG chọn "Topmost"), flow 25% · spacing 0.1 · speed 30. *PETG ủi dễ tơ/blob — cân nhắc, PLA an toàn.*
+> Không thấy ironing? → bạn import file `_DEFAUT` (đúng là TẮT); file `_DEFAUT_IRONING` mới có, xem ở **Quality ▸ Ironing ▸ Ironing Type = Top surfaces**.
 
 ## 3.Support_CungLoai (1 nhựa · 1 màu)
 | Đuôi | Top Z | Interface |
