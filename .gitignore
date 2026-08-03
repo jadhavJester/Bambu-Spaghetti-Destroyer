@@ -45,6 +45,6 @@ notify.log
 ai_usage.json
 
 # Audit tam (chay lai bang audit_all.py)
-audit_out.jsonl
+audit_out*.jsonl
 audit_run*.log
 hub_new.log

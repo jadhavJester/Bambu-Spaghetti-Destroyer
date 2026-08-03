@@ -44,15 +44,25 @@ def _xf(v, m):
 
 
 def _mesh_tris(xml: str, mats: list) -> list:
-    """Doc vertex/triangle tu 1 file .model roi ap lan luot cac ma tran trong mats."""
-    V = [(float(a), float(b), float(c)) for a, b, c in re.findall(
-        r'<vertex[^>]*x="([-\d.eE]+)"[^>]*y="([-\d.eE]+)"[^>]*z="([-\d.eE]+)"', xml)]
-    for m in mats:
-        if m:
-            V = [_xf(v, m) for v in V]
-    T = [(int(a), int(b), int(c)) for a, b, c in re.findall(
-        r'<triangle[^>]*v1="(\d+)"[^>]*v2="(\d+)"[^>]*v3="(\d+)"', xml)]
-    return [(V[i], V[j], V[k]) for i, j, k in T if i < len(V) and j < len(V) and k < len(V)]
+    """Doc vertex/triangle tu 1 file/khoi .model roi ap lan luot cac ma tran trong mats.
+
+    AN TOAN DA-OBJECT (bug 2-Plate_Desk_Trash_Can_V2 2026-08-03): moi <object> trong
+    file .model co danh sach vertex RIENG, index tam giac dem tu 0 THEO object do. Neu
+    gop het vertex nhieu object vao 1 list roi map index -> tam giac object sau tro
+    NHAM vao vertex object truoc -> mesh RAC (dims/overhang/support sai, hien '2 hinh
+    thoi'). Vi vay: doc TUNG <object> DOC LAP roi moi gop tris."""
+    blocks = re.findall(r'<object\b[^>]*>.*?</object>', xml, re.S) or [xml]
+    out: list = []
+    for blk in blocks:
+        V = [(float(a), float(b), float(c)) for a, b, c in re.findall(
+            r'<vertex[^>]*x="([-\d.eE]+)"[^>]*y="([-\d.eE]+)"[^>]*z="([-\d.eE]+)"', blk)]
+        for m in mats:
+            if m:
+                V = [_xf(v, m) for v in V]
+        T = [(int(a), int(b), int(c)) for a, b, c in re.findall(
+            r'<triangle[^>]*v1="(\d+)"[^>]*v2="(\d+)"[^>]*v3="(\d+)"', blk)]
+        out += [(V[i], V[j], V[k]) for i, j, k in T if i < len(V) and j < len(V) and k < len(V)]
+    return out
 
 
 def plates_3mf(z: zipfile.ZipFile) -> list:
@@ -188,8 +198,19 @@ def load_3mf_tris(z: zipfile.ZipFile, names: list, notes: list | None = None,
             want = pm.group(1).lstrip("/").lower()
             src = next((n for n in models if n.lower() == want), None)
             if src:
-                tris += _mesh_tris(z.read(src).decode("utf-8", "ignore"),
-                                   [cmat, items[oid]])
+                sub = z.read(src).decode("utf-8", "ignore")
+                # Component tro toi 1 object_id CU THE trong file dich. File .model
+                # co the chua NHIEU object (vat 2 mau: than + nap = 2 part, moi part
+                # 1 component objectid rieng). Doc CA file cho MOI component -> moi
+                # part bi doc LAP + sai transform -> mesh gap doi, support ao (bug
+                # 2-Plate_Desk_Trash_Can_V2). Chi lay dung <object id=objectid>.
+                com_oid = re.search(r'objectid="(\d+)"', tag)
+                if com_oid:
+                    blk = re.search(r'<object\b[^>]*\bid="' + com_oid.group(1)
+                                    + r'"[^>]*>.*?</object>', sub, re.S)
+                    if blk:
+                        sub = blk.group(0)
+                tris += _mesh_tris(sub, [cmat, items[oid]])
     if tris:
         return tris
     # fallback: khong doc duoc gi tu root -> hanh vi cu (file Objects dau tien, khong transform)
