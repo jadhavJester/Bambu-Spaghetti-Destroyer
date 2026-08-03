@@ -38,6 +38,43 @@ def _count(kind: str) -> None:
             pass
 
 
+# ── MODEL GHIM (user chon qua /model tren Telegram) — bug 2026-08-03: bot "doi model
+#    lien tuc" vi chuoi fallback tra model NAO dap truoc. Ghim = KHOA 1 model, on dinh.
+_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ai_model.txt")
+
+# Danh muc cho /model. (id OpenRouter, ten ngan, ghi chu). 'auto' = dung chuoi fallback.
+MODELS = [
+    ("auto", "Tự động (fallback)", "thử DeepSeek→free→paid, model đổi theo cái nào đáp"),
+    ("deepseek/deepseek-v4-flash", "DeepSeek V4 Flash", "trả phí · kỹ thuật chuẩn, tiếng Việt sạch ~5s"),
+    ("nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", "Nemotron Nano", "MIỄN PHÍ · có vision"),
+    ("openai/gpt-5-nano", "GPT-5 nano", "trả phí · nhanh"),
+    ("google/gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite", "trả phí · nhìn ảnh tốt"),
+]
+
+
+def pinned_model() -> str:
+    """Model user GHIM (ai_model.txt). '' / 'auto' = khong ghim (dung chuoi fallback)."""
+    try:
+        return open(_MODEL_PATH, encoding="utf-8").read().strip()
+    except OSError:
+        return ""
+
+
+def set_model(name: str) -> None:
+    try:
+        open(_MODEL_PATH, "w", encoding="utf-8").write((name or "").strip())
+    except OSError:
+        pass
+
+
+def current_model() -> str:
+    """Model dang hieu luc: pin > OPENROUTER_MODEL (.env) > DEFAULT."""
+    p = pinned_model()
+    if p and p != "auto":
+        return p
+    return _cfg()[1]
+
+
 def _counts() -> dict:
     try:
         return json.load(open(_USAGE_PATH, encoding="utf-8"))
@@ -222,6 +259,11 @@ def _chain(primary: str, vision: bool = False) -> list[str]:
     DeepSeek KHONG co ban free tren OpenRouter (tra 11 model, 2026-07-17) va KHONG
     co vision -> vision van dung gemini-2.5-flash-lite, du phong Nano Omni free.
     """
+    # GHIM: user chon 1 model cu the -> KHOA, khong drift (bug 2026-08-03). Vision van
+    # can model nhin duoc anh nen bo qua ghim text.
+    pin = pinned_model()
+    if pin and pin != "auto" and not vision:
+        return [pin]
     try:
         env = printer_config._parse_dotenv(printer_config.env_path())  # noqa: SLF001
     except Exception:                                   # noqa: BLE001
@@ -238,13 +280,19 @@ def _chain(primary: str, vision: bool = False) -> list[str]:
 
 
 def ask(question: str, context: str = "", system: str = SYSTEM,
-        timeout: int = 45, max_tokens: int = 700) -> str | None:
-    """Hoi 1 cau -> tra loi text; tu FALLBACK qua chuoi model, None khi het chuoi."""
+        timeout: int = 45, max_tokens: int = 700, history: list | None = None) -> str | None:
+    """Hoi 1 cau -> tra loi text; tu FALLBACK qua chuoi model, None khi het chuoi.
+
+    history: cac luot TRUOC [{'role':'user'/'assistant','content':...}] -> AI CO NGU CANH
+    hoi thoai (bug 2026-08-03: bot mat context vi moi cau la [system,user] roi rac)."""
     key, model = _cfg()
     if not key or not question.strip():
         return None
     user = question if not context else f"{question}\n\n[Bối cảnh máy in hiện tại]\n{context}"
-    msgs = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    msgs = [{"role": "system", "content": system}]
+    if history:
+        msgs += list(history)                           # nho cac luot truoc
+    msgs.append({"role": "user", "content": user})
     for m in _chain(model):
         out = _call(m, key, msgs, max_tokens, timeout)
         if out:

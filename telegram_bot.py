@@ -51,6 +51,58 @@ _VISION_WORDS = ("ảnh", "anh ban in", "hình", "hinh", "nhìn", "nhin", "camer
 
 _PEND = {"stop_until": 0.0}
 
+# ── LICH SU HOI THOAI theo chat (bug 2026-08-03: bot "mat ngu canh/context"). Giu
+#    toi da _HIST_TURNS luot gan nhat (moi luot = 1 user + 1 assistant) de AI nho
+#    mach hoi thoai. Reset bang /reset hoac /moi.
+_HIST: dict = {}
+_HIST_TURNS = 5                                          # 5 luot ~ 10 tin, du ngu canh
+
+
+def _hist_get(chat: str) -> list:
+    return _HIST.get(str(chat), [])
+
+
+def _hist_add(chat: str, q: str, a: str) -> None:
+    h = _HIST.setdefault(str(chat), [])
+    h.append({"role": "user", "content": q})
+    h.append({"role": "assistant", "content": a})
+    del h[: max(0, len(h) - _HIST_TURNS * 2)]           # cat con _HIST_TURNS luot
+
+
+def _hist_clear(chat: str) -> None:
+    _HIST.pop(str(chat), None)
+
+
+def _cmd_model(token: str, chat: str, text: str) -> None:
+    """/model = liet ke + hien model dang dung. /model <so> = GHIM 1 model (on dinh)."""
+    models = ai_chat.MODELS
+    cur = ai_chat.pinned_model() or "auto"
+    cur_name = next((n for mid, n, _ in models if mid == cur), cur)
+    parts = text.split(maxsplit=1)
+    arg = parts[1].strip() if len(parts) > 1 else ""
+    if not arg:
+        lines = ["🤖 <b>Model AI</b> — gõ <code>/model &lt;số&gt;</code> để ghim (khoá 1 model, "
+                 "hết đổi liên tục):"]
+        for i, (mid, name, note) in enumerate(models, 1):
+            mark = " ✅" if mid == cur else ""
+            lines.append(f"<b>{i}. {name}</b>{mark}\n   <i>{note}</i>")
+        lines.append(f"\nĐang dùng: <b>{cur_name}</b>")
+        _send(token, chat, "\n".join(lines))
+        return
+    pick = None
+    if arg.isdigit() and 1 <= int(arg) <= len(models):
+        pick = models[int(arg) - 1]
+    else:
+        al = arg.lower()
+        pick = next((m for m in models if al in m[0].lower() or al in m[1].lower()), None)
+    if not pick:
+        _send(token, chat, "Số/tên model không đúng. Gõ <b>/model</b> để xem danh sách.")
+        return
+    ai_chat.set_model(pick[0])
+    tail = ("\n(auto = model đổi theo cái nào đáp trước)" if pick[0] == "auto"
+            else "\n(đã KHOÁ 1 model — không đổi nữa)")
+    _send(token, chat, f"✅ Ghim model: <b>{pick[1]}</b>\n<i>{pick[2]}</i>{tail}")
+
 
 def _cfg() -> tuple[str | None, str | None]:
     e = notify._env()                                    # noqa: SLF001 — cung nguon .env
@@ -190,10 +242,15 @@ def _handle(token: str, chat: str, text: str, hooks: dict) -> None:  # noqa: PLR
             _send(token, chat, "⏹ Đã gửi lệnh DỪNG HẲN." if ok else f"Lỗi: {msg}")
         else:
             _send(token, chat, "Hết hạn xác nhận — bấm ⏹ DỪNG HẲN lại nếu vẫn muốn dừng.")
+    elif t in ("/reset", "/moi", "/quen"):
+        _hist_clear(chat)
+        _send(token, chat, "🧹 Đã XOÁ ngữ cảnh hội thoại. Câu sau bắt đầu chủ đề mới.")
+    elif tl.startswith("/model"):
+        _cmd_model(token, chat, t)
     elif t.startswith("/"):
         # lenh go sai (vd /strart) — nhac lenh dung, khong dot luot AI vo ich
-        _send(token, chat, "Lệnh không có. Dùng: /start · /status · /photo · /help "
-                           "— hoặc bấm nút bên dưới.")
+        _send(token, chat, "Lệnh không có. Dùng: /start · /status · /photo · /model · "
+                           "/reset · /help — hoặc bấm nút bên dưới.")
     else:
         # cau hoi tu do — nhac toi anh/nhin/san pham thi kem ANH cho AI vision
         if any(w in tl for w in _VISION_WORDS):
@@ -202,10 +259,16 @@ def _handle(token: str, chat: str, text: str, hooks: dict) -> None:  # noqa: PLR
                 a = ai_chat.ask_vision(
                     t + "\n(Ảnh 1 = camera bàn in thật; ảnh 2 nếu có = render model.)",
                     imgs, context=hooks["status"]())
+                if a:
+                    _hist_add(chat, t, a)                # anh cung vao mach hoi thoai
                 _send(token, chat, _sig(a, "AI vision không phản hồi — thử lại sau."),
                       html=False)
                 return
-        a = ai_chat.ask(t, context=hooks["status"]() + "\n" + hooks["temps"]())
+        # NHO NGU CANH: gui kem lich su cac luot truoc cua chat nay
+        a = ai_chat.ask(t, context=hooks["status"]() + "\n" + hooks["temps"](),
+                        history=_hist_get(chat))
+        if a:
+            _hist_add(chat, t, a)
         _send(token, chat, _sig(a, "AI không phản hồi (model free có thể hết lượt hôm "
                                    "nay) — thử lại sau."), html=False)
 
@@ -235,6 +298,8 @@ def _register_commands(token: str) -> None:
             {"command": "status", "description": "📊 Tình hình in"},
             {"command": "photo", "description": "📷 Ảnh bàn in từ camera"},
             {"command": "usage", "description": "💰 Chi phí AI / số dư / còn bao nhiêu lần"},
+            {"command": "model", "description": "🤖 Chọn / khoá model AI"},
+            {"command": "reset", "description": "🧹 Xoá ngữ cảnh hội thoại"},
             {"command": "help", "description": "Hướng dẫn dùng bot"},
         ]}, timeout=20)
     except Exception:                                    # noqa: BLE001

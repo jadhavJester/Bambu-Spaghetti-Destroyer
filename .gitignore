@@ -48,3 +48,4 @@ ai_usage.json
 audit_out*.jsonl
 audit_run*.log
 hub_new.log
+ai_model.txt
