@@ -81,13 +81,14 @@ def _cmd_model(token: str, chat: str, text: str) -> None:
     parts = text.split(maxsplit=1)
     arg = parts[1].strip() if len(parts) > 1 else ""
     if not arg:
-        lines = ["🤖 <b>Model AI</b> — gõ <code>/model &lt;số&gt;</code> để ghim (khoá 1 model, "
-                 "hết đổi liên tục):"]
+        # BAM NUT chon (inline keyboard) — user 2026-08-03 "bam model cho chon"
+        rows = []
         for i, (mid, name, note) in enumerate(models, 1):
             mark = " ✅" if mid == cur else ""
-            lines.append(f"<b>{i}. {name}</b>{mark}\n   <i>{note}</i>")
-        lines.append(f"\nĐang dùng: <b>{cur_name}</b>")
-        _send(token, chat, "\n".join(lines))
+            rows.append([(f"{i}. {name}{mark}", f"m:{i}")])
+        _send_inline(token, chat,
+                     f"🤖 <b>Chọn model AI</b> — BẤM 1 nút để khoá (hết đổi liên tục).\n"
+                     f"Đang dùng: <b>{cur_name}</b>", rows)
         return
     pick = None
     if arg.isdigit() and 1 <= int(arg) <= len(models):
@@ -102,6 +103,35 @@ def _cmd_model(token: str, chat: str, text: str) -> None:
     tail = ("\n(auto = model đổi theo cái nào đáp trước)" if pick[0] == "auto"
             else "\n(đã KHOÁ 1 model — không đổi nữa)")
     _send(token, chat, f"✅ Ghim model: <b>{pick[1]}</b>\n<i>{pick[2]}</i>{tail}")
+
+
+def _handle_callback(token: str, chat: str, cq: dict, hooks: dict) -> None:
+    """Xu ly BAM NUT (callback_query). Hien chi co nut chon model 'm:<so>'."""
+    cqid = cq.get("id")
+    data = cq.get("data") or ""
+    try:                                                 # tat spinner tren nut
+        _api(token, "answerCallbackQuery", {"callback_query_id": cqid}, timeout=10)
+    except Exception:                                    # noqa: BLE001
+        pass
+    if data.startswith("m:"):
+        try:
+            i = int(data[2:])
+        except ValueError:
+            return
+        models = ai_chat.MODELS
+        if 1 <= i <= len(models):
+            pick = models[i - 1]
+            ai_chat.set_model(pick[0])
+            tail = ("auto = đổi theo cái nào đáp" if pick[0] == "auto"
+                    else "đã KHOÁ 1 model — không đổi nữa")
+            _send(token, chat, f"✅ Ghim model: <b>{pick[1]}</b>\n<i>{pick[2]}</i>\n({tail})")
+
+
+def _cb_safe(token: str, chat: str, cq: dict, hooks: dict) -> None:
+    try:
+        _handle_callback(token, chat, cq, hooks)
+    except Exception as e:                               # noqa: BLE001
+        notify._log(f"[bot] callback loi: {type(e).__name__}: {str(e)[:160]}")  # noqa: SLF001
 
 
 def _cfg() -> tuple[str | None, str | None]:
@@ -127,6 +157,17 @@ def _send(token: str, chat: str, text: str, html: bool = True) -> None:
     except Exception:                                    # noqa: BLE001
         if html:                                         # HTML loi (ky tu la) -> gui tho
             _send(token, chat, text, html=False)
+
+
+def _send_inline(token: str, chat: str, text: str, rows: list) -> None:
+    """Gui tin kem NUT BAM (inline keyboard). rows = [[(nhan, callback_data)]]."""
+    kb = {"inline_keyboard": [[{"text": lbl, "callback_data": cd} for lbl, cd in row]
+                              for row in rows]}
+    try:
+        _api(token, "sendMessage", {"chat_id": chat, "text": text, "parse_mode": "HTML",
+                                    "reply_markup": kb}, timeout=20)
+    except Exception:                                    # noqa: BLE001
+        _send(token, chat, text, html=False)
 
 
 def _send_photo(token: str, chat: str, jpg: bytes, caption: str = "") -> None:
@@ -331,13 +372,21 @@ def loop(hooks: dict) -> None:
                 _register_commands(token)
                 registered = True
             r = _api(token, "getUpdates",
-                     {"timeout": 50, "offset": offset, "allowed_updates": ["message"]})
+                     {"timeout": 50, "offset": offset,
+                      "allowed_updates": ["message", "callback_query"]})
             LAST_POLL = time.time()
             if LAST_POLL - hb > 1800:            # nhip tim 30'/lan: log de biet con song
                 hb = LAST_POLL
                 notify._log(f"[bot] poll song (offset={offset})")   # noqa: SLF001
             for u in r.get("result", []):
                 offset = max(offset, u["update_id"] + 1)
+                cq = u.get("callback_query")
+                if cq:                          # BAM NUT (vd chon model)
+                    cc = str(((cq.get("message") or {}).get("chat") or {}).get("id") or "")
+                    if cc == str(me):
+                        threading.Thread(target=_cb_safe, args=(token, cc, cq, hooks),
+                                         daemon=True).start()
+                    continue
                 m = u.get("message") or {}
                 chat = str((m.get("chat") or {}).get("id") or "")
                 if chat != str(me):
