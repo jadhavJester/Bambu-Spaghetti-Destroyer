@@ -1529,11 +1529,20 @@ def make_preset(r: dict, name: str = "OPT", mode: str = "balanced",
         # dung mat NHIN THAY nhieu nhat. Truoc day set cung 150/110 co the vuot vmax.
         outer = min(M["outer"] or min(safe, 180), safe)
         p["outer_wall_speed"] = [str(outer)]
-        p["top_surface_speed"] = [str(min(outer, 150, safe))]
+        # MAT TREN: line phai LIEN thanh DA MIN. Chay sat tran chay (>~60%) thi nhua ra
+        # KHONG KIP -> line ho -> SOC tren mat top (bug user PETG 2026-08-03: top 150 =
+        # 90% tran PETG 167). Cap rieng mat tren o 60% tran chay -> PLA (vmax 250) van
+        # =150 KHONG doi; PETG (vmax 167) tu ha ve 100; Matte (143) ve 86.
+        top_cap = round(vmax * 0.6)
+        top = min(outer, 150, safe, top_cap)
+        p["top_surface_speed"] = [str(top)]
         why.append(f"Tốc độ ≤{safe} mm/s: ở layer {lh}mm, nhựa {mvs} mm³/s chỉ cho tối đa "
                    f"{vmax} mm/s. Đặt cao hơn là số ảo — máy tự hãm."
                    + (f" Thành ngoài {outer} để mặt mịn." if M["outer"] else
                       " Thành ngoài cũng chạy hết tốc (ưu tiên nhanh).")
+                   + (f" Mặt trên {top} mm/s (≤60% trần chảy {vmax}) — line phải LIỀN thành da mịn, "
+                      f"chạy sát trần là hở → SỌC mặt top (nhất là PETG/Matte flow thấp)."
+                      if top < min(outer, 150) else "")
                    + (f" Trần chảy {int(mvs)} mm³/s lấy theo cuộn BẠN CHỌN ({_sel['key']}) — "
                       f"số chống kẹt của chính cuộn đó, không theo khai báo trong file."
                       if _sel.get("key") and _sel.get("mvs") else ""))
