@@ -151,8 +151,31 @@ def plate_fil(path: str, plate: int | None) -> tuple:
     return _plate_primary(ms, oids, cols, types)
 
 
+def _part_hex_map(ms: str, oid: str, cols: list) -> dict:
+    """{part_id: hex mau} cho tung PART cua object oid (in-by-object 2 mau: than PETG +
+    nap PLA moi part 1 extruder rieng). extruder -> filament_colour. Rong neu ko doc."""
+    out: dict = {}
+    if not ms or not cols:
+        return out
+    om = re.search(r'<object id="' + re.escape(str(oid)) + r'".*?</object>', ms, re.S)
+    if not om:
+        return out
+    for pm in re.finditer(r'<part id="(\d+)".*?</part>', om.group(0), re.S):
+        ext = re.search(r'key="extruder"\s+value="(\d+)"', pm.group(0))
+        e = int(ext.group(1)) if ext else 1
+        out[pm.group(1)] = cols[e - 1] if 1 <= e <= len(cols) else None
+    # fallback: object khong co <part> -> extruder o metadata object
+    if not out:
+        oe = re.search(r'key="extruder"\s+value="(\d+)"', om.group(0))
+        if oe:
+            e = int(oe.group(1))
+            out["*"] = cols[e - 1] if 1 <= e <= len(cols) else None
+    return out
+
+
 def load_3mf_tris(z: zipfile.ZipFile, names: list, notes: list | None = None,
-                  only_objects: list | None = None) -> list:
+                  only_objects: list | None = None, ms: str | None = None,
+                  cols: list | None = None, tri_hex: list | None = None) -> list:
     """Doc mesh trong .3mf va ap transform xoay/di chuyen cua Bambu Studio.
 
     Bambu luu phep xoay o <component transform> + <item transform> trong
@@ -180,14 +203,22 @@ def load_3mf_tris(z: zipfile.ZipFile, names: list, notes: list | None = None,
 
     keep = set(only_objects) if only_objects else None
     tris: list = []
+
+    def _add(chunk: list, hexc):     # gop tris + ghi mau tung tam giac (neu can)
+        tris.extend(chunk)
+        if tri_hex is not None:
+            tri_hex.extend([hexc] * len(chunk))
+
     for om in re.finditer(r'<object\b[^>]*\bid="(\d+)"[^>]*>(.*?)</object>', xml, re.S):
         oid, body = om.group(1), om.group(2)
         if oid not in items:
             continue                 # object khong duoc build -> bo qua
         if keep is not None and oid not in keep:
             continue                 # object cua KHAY KHAC -> bo (tranh gop 3 khay lam 1)
+        pmap = _part_hex_map(ms, oid, cols) if tri_hex is not None else {}
+        obj_hex = pmap.get("*")      # mau muc-object (khi khong tach part)
         if "<mesh" in body:          # mesh nhung truc tiep trong root (3mf ngoai Bambu)
-            tris += _mesh_tris(body, [items[oid]])
+            _add(_mesh_tris(body, [items[oid]]), obj_hex)
         for cm in re.finditer(r'<component\b[^>]*/?>', body):
             tag = cm.group(0)
             pm = re.search(r'(?:\w+:)?path="([^"]+)"', tag)
@@ -210,7 +241,9 @@ def load_3mf_tris(z: zipfile.ZipFile, names: list, notes: list | None = None,
                                     + r'"[^>]*>.*?</object>', sub, re.S)
                     if blk:
                         sub = blk.group(0)
-                tris += _mesh_tris(sub, [cmat, items[oid]])
+                # mau part: part id trong model_settings KHOP objectid cua component
+                part_hex = pmap.get(com_oid.group(1)) if (com_oid and pmap) else obj_hex
+                _add(_mesh_tris(sub, [cmat, items[oid]]), part_hex)
     if tris:
         return tris
     # fallback: khong doc duoc gi tu root -> hanh vi cu (file Objects dau tien, khong transform)
@@ -350,17 +383,19 @@ def _rot_vertex(v, axis: str, ca: float, sa: float):
 
 def render_iso_svg(tris: list, axis: str = "X", ang: float = 0,
                    size: int = 230, max_faces: int = 12000,
-                   rgb: tuple = (233, 125, 62)) -> str:
+                   rgb: tuple = (233, 125, 62), tri_rgb: list | None = None) -> str:
     """Ve model da xoay thanh anh SVG isometric nho (painter's algorithm thuan Python).
 
     Muc dich: user NHIN THAY model up mat nao xuong ban o huong de xuat — khong phai
-    doan tu con so goc. Mesh lon thi giu max_faces tam giac to nhat (du hinh dang)."""
+    doan tu con so goc. Mesh lon thi giu max_faces tam giac to nhat (du hinh dang).
+    tri_rgb: mau (r,g,b) TUNG tam giac (in-by-object 2 mau: than PETG xam + nap PLA
+    cam) — None cho tung tam giac thi dung `rgb` chung."""
     a = math.radians(ang)
     ca, sa = math.cos(a), math.sin(a)
     C30, S30 = math.cos(math.radians(30)), math.sin(math.radians(30))
     lx, ly, lz = 0.40, 0.30, 0.87                       # huong den (da chuan hoa ~1)
     faces = []
-    for p, q, r in tris:
+    for i, (p, q, r) in enumerate(tris):
         p2, q2, r2 = (_rot_vertex(v, axis, ca, sa) for v in (p, q, r))
         ux, uy, uz = q2[0]-p2[0], q2[1]-p2[1], q2[2]-p2[2]
         vx, vy, vz = r2[0]-p2[0], r2[1]-p2[1], r2[2]-p2[2]
@@ -372,6 +407,7 @@ def render_iso_svg(tris: list, axis: str = "X", ang: float = 0,
         if (nx + ny + nz) / L <= 0:
             continue
         shade = 0.35 + 0.65 * max(0.0, (nx*lx + ny*ly + nz*lz) / L)
+        base = (tri_rgb[i] if tri_rgb and i < len(tri_rgb) and tri_rgb[i] else rgb)
         pts = []
         depth = 0.0
         for x, y, z in (p2, q2, r2):
@@ -379,42 +415,51 @@ def render_iso_svg(tris: list, axis: str = "X", ang: float = 0,
             w = (x + y) * S30 - z                       # truc man hinh huong xuong
             pts.append((u, w))
             depth += x + y + z
-        faces.append((depth / 3, L / 2, shade, pts))
+        faces.append((depth / 3, L / 2, shade, pts, base))
     if not faces:
         return ""
     if len(faces) > max_faces:                          # mesh khung: giu tam giac to
         faces.sort(key=lambda f: -f[1])
         faces = faces[:max_faces]
     faces.sort(key=lambda f: f[0])                      # xa ve truoc (painter)
-    us = [u for _, _, _, pts in faces for u, _ in pts]
-    ws = [w for _, _, _, pts in faces for _, w in pts]
+    us = [u for _, _, _, pts, _ in faces for u, _ in pts]
+    ws = [w for _, _, _, pts, _ in faces for _, w in pts]
     u0, u1, w0, w1 = min(us), max(us), min(ws), max(ws)
     span = max(u1 - u0, w1 - w0) or 1.0
     k = (size - 16) / span
     parts = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" '
              f'viewBox="0 0 {size} {size}">']
-    for _, _, shade, pts in faces:
-        cr, cg, cb = int(rgb[0]*shade), int(rgb[1]*shade), int(rgb[2]*shade)
+    for _, _, shade, pts, base in faces:
+        cr, cg, cb = int(base[0]*shade), int(base[1]*shade), int(base[2]*shade)
         d = " ".join(f"{(u-u0)*k+8:.1f},{(w-w0)*k+8:.1f}" for u, w in pts)
         parts.append(f'<polygon points="{d}" fill="rgb({cr},{cg},{cb})"/>')
     parts.append("</svg>")
     return "".join(parts)
 
 
-def rot_preview(tris: list, rots: list, color: str | None = None) -> dict:
+def _hex_rgb(h: str | None, default: tuple = (233, 125, 62)) -> tuple:
+    """'#RRGGBB' -> (r,g,b), nang mau qua toi len >=40 de con thay khoi. Loi -> default."""
+    if not h:
+        return default
+    h = h.lstrip("#")
+    if len(h) >= 6:
+        try:
+            return tuple(max(int(h[i:i+2], 16), 40) for i in (0, 2, 4))
+        except ValueError:
+            pass
+    return default
+
+
+def rot_preview(tris: list, rots: list, color: str | None = None,
+                tri_hex: list | None = None) -> dict:
     """Cap anh render 'hien tai' vs 'de xuat' — user NHIN de biet xoay the nao.
-    color: hex '#RRGGBB' cua khay AMS that (tu MQTT) -> render dung mau nhua."""
-    rgb = (233, 125, 62)
-    if color:
-        h = color.lstrip("#")
-        if len(h) >= 6:
-            try:
-                c = tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
-                # mau qua toi thi nang len de con thay khoi (shade nhan them 0.35-1.0)
-                rgb = tuple(max(v, 40) for v in c)
-            except ValueError:
-                pass
-    out = {"current": render_iso_svg(tris, "X", 0, rgb=rgb)}
+    color: hex '#RRGGBB' mau CHINH khay (khi vat 1 mau). tri_hex: mau TUNG tam giac
+    (vat in-by-object 2 mau: than PETG + nap PLA moi part 1 mau) -> render dung mau that."""
+    rgb = _hex_rgb(color)
+    # doi hex/tam giac -> rgb/tam giac (None giu de fallback ve rgb chung)
+    tri_rgb = ([_hex_rgb(h, None) if h else None for h in tri_hex]
+               if tri_hex and any(tri_hex) else None)
+    out = {"current": render_iso_svg(tris, "X", 0, rgb=rgb, tri_rgb=tri_rgb)}
 
     # 1-2 GOI Y XOAY — CHI khi THUC SU BOT SUPPORT, khong bia phuong an te hon:
     #   - support_cm3 phai THAP HON ro rang -> xoay de BOT NHUA+GIO support (dung y user:
@@ -443,7 +488,7 @@ def rot_preview(tris: list, rots: list, color: str | None = None) -> dict:
         opts.append({"axis": x["axis"], "angle": x["angle"], "overhang_pct": x["overhang_pct"],
                      "bed_cm2": x["bed_cm2"], "height": x["height"],
                      "support_cm3": x.get("support_cm3", 0),
-                     "svg": render_iso_svg(tris, x["axis"], x["angle"], rgb=rgb)})
+                     "svg": render_iso_svg(tris, x["axis"], x["angle"], rgb=rgb, tri_rgb=tri_rgb)})
         if len(opts) >= 2:
             break
     out["options"] = opts
@@ -656,9 +701,13 @@ def analyze_3mf(path: str, color: str | None = None, plate: int | None = None) -
         res["plate_used_colors"] = sorted({_cols[i - 1] for i in set(_plate_ext_list(_ms, _objs))
                                            if 1 <= i <= len(_cols)})
 
-        # mesh — doc qua load_3mf_tris de AP TRANSFORM xoay cua Bambu Studio
+        # mesh — doc qua load_3mf_tris de AP TRANSFORM xoay cua Bambu Studio.
+        # tri_hex: mau TUNG tam giac (vat in-by-object 2 mau: than PETG + nap PLA) ->
+        # anh xoay to DUNG mau that tung part, khong phai 1 mau chinh cho ca khoi.
+        _tri_hex: list = []
         tris = load_3mf_tris(z, names, notes=res["tips"],
-                             only_objects=(cur["objects"] if cur else None))
+                             only_objects=(cur["objects"] if cur else None),
+                             ms=_ms, cols=_cols, tri_hex=_tri_hex)
         if tris:
             res["mesh"] = mesh_stats(tris)
             res["faces"] = face_analysis(tris)
@@ -667,8 +716,10 @@ def analyze_3mf(path: str, color: str | None = None, plate: int | None = None) -
                 res["thin"] = thin_walls(tris)
             if len(tris) <= ROT_MAX_TRIS:
                 res["rotations"] = try_rotations(tris)
-                # anh xoay TO mau THEO KHAY (den cho khay 2), khong phai mau file/AMS #1
-                res["rot_preview"] = rot_preview(tris, res["rotations"], p_col or color)
+                # anh xoay TO mau THEO PART (than xam PETG + nap cam PLA); vat 1 mau ->
+                # p_col (mau chinh khay, den cho khay 2) hoac AMS that.
+                res["rot_preview"] = rot_preview(tris, res["rotations"], p_col or color,
+                                                 tri_hex=(_tri_hex if len(_tri_hex) == len(tris) else None))
             else:
                 res["tips"].append(f"Mesh {len(tris):,} tam giác vượt ngưỡng {ROT_MAX_TRIS:,} — bỏ quét xoay để không treo server.")
 
