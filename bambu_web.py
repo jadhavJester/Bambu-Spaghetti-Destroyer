@@ -1537,6 +1537,13 @@ async function aiVision(){
 }
 /* ===== HOI DAP AI ===== */
 let AIBUSY=false;
+/* Tô ĐỎ dòng cảnh báo (bắt đầu ⚠️ hoặc chứa CẢNH BÁO/DÍNH CHẾT) trong câu trả lời AI */
+function aiFmt(s){
+  return esc2(s||"?").split("\n").map(function(ln){
+    return /⚠️|⚠|CẢNH BÁO|DÍNH CHẾT/i.test(ln)
+      ? '<span style="color:#f87171;font-weight:600">'+ln+'</span>' : ln;
+  }).join("\n");
+}
 async function aiAsk(){
   const inp=document.getElementById("aiq"), log=document.getElementById("ailog");
   const q=(inp.value||"").trim(); if(!q||AIBUSY) return;
@@ -1547,7 +1554,7 @@ async function aiAsk(){
   try{
     const j=await (await fetch("/api/ai-chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({q:q})})).json();
     document.getElementById("aiwait").outerHTML=
-      '<div style="margin:6px 0"><span style="background:rgba(34,197,94,.12);border-left:3px solid var(--acc);border-radius:8px;padding:6px 10px;display:inline-block;white-space:pre-wrap">'+esc2(j.answer||"?")+'</span></div>';
+      '<div style="margin:6px 0"><span style="background:rgba(34,197,94,.12);border-left:3px solid var(--acc);border-radius:8px;padding:6px 10px;display:inline-block;white-space:pre-wrap">'+aiFmt(j.answer)+'</span></div>';
   }catch(e){
     document.getElementById("aiwait").outerHTML='<div class="mut" style="margin:6px 0">lỗi mạng: '+esc2(String(e))+'</div>';
   }
