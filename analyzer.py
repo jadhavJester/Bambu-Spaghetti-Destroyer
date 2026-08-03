@@ -2318,17 +2318,32 @@ def support_strategy(model_type: str, ams: list | None = None) -> list:
     partner = {"PLA": "PETG", "PETG": "PLA"}.get(fam)
     pslot = next((i + 1 for i, t in enumerate(ams[:4]) if partner and t.startswith(partner)), 0)
     sslot = next((i + 1 for i, t in enumerate(ams[:4]) if t.startswith(fam)), 1)
+    # PETG HAN chinh no manh hon PLA -> cung loai phai de Top Z LON hon (1.5-2x layer
+    # height, blog test nghin ban + forum Bambu) keo khong dinh CHET. PLA/khac: 0.15/0.25.
+    is_petg = fam == "PETG"
+    z_sm, zb_sm = ("0.3", "0.2") if is_petg else ("0.15", "0.15")
+    z_ez, zb_ez = ("0.4", "0.2") if is_petg else ("0.25", "0.2")
+    petg_tip = (" ⚑ PETG: nên đổi Base pattern → GYROID (bẻ ra như kéo khoá; zig-zag/grid PETG "
+                "dính rất khó bẻ) + tốc độ interface 30–40mm/s cho mặt phẳng đẹp — chỉnh tay trong "
+                "Studio (Support ▸ Base pattern / Speed)." if is_petg else "")
+
+    def _sum(k: dict) -> str:                    # tom tat gia tri de HIEN tren card
+        return (f"Top Z {k['support_top_z_distance']} · Bottom Z {k['support_bottom_z_distance']} · "
+                f"interface {k['support_interface_top_layers']} lớp {k['support_interface_pattern']} · "
+                f"spacing {k['support_interface_spacing']}")
+
     out = []
     if pslot:                                    # KHAC vat lieu — chi khi co doi ung THAT
+        _df = {"enable_support": "1", "support_filament": "0",
+               "support_interface_filament": str(pslot),
+               "support_interface_top_layers": "1", "support_interface_bottom_layers": "0",
+               "support_top_z_distance": "0", "support_bottom_z_distance": "0",
+               "support_interface_spacing": "0", "support_interface_pattern": "concentric"}
         out.append({
             "id": "diff", "label": f"Interface {partner} — mặt đẹp nhất (khác vật liệu)",
             # ĐẾ support = model (support_filament 0), CHỈ INTERFACE = partner, 1 lop la du
             # (user 2026-07-19: PLA in, 1 lop top PETG la go sach). Z=0 vi khong dinh hoa hoc.
-            "keys": {"enable_support": "1", "support_filament": "0",
-                     "support_interface_filament": str(pslot),
-                     "support_interface_top_layers": "1", "support_interface_bottom_layers": "0",
-                     "support_top_z_distance": "0", "support_bottom_z_distance": "0",
-                     "support_interface_spacing": "0", "support_interface_pattern": "concentric"},
+            "keys": _df, "summary": _sum(_df) + f" · interface = {partner} (khe {pslot})",
             "why": (f"{fam} và {partner} KHÔNG dính hoá học (Bambu wiki) → chỉ cần 1 LỚP interface {partner} "
                     f"ép khít Z=0 vẫn BÓC SẠCH, mặt dưới nhẵn như mặt trên. ĐẾ support vẫn {fam} (rẻ, "
                     f"ít đổi nozzle). Nhớ FLUSH nhiều khi đổi sang model (cộng đồng: PLA→PETG ~650, "
@@ -2336,25 +2351,27 @@ def support_strategy(model_type: str, ams: list | None = None) -> list:
                     + (" ⚠ Bambu chính thức chỉ test PLA Basic+PETG (KHÔNG Matte/Silk/CF); Matte cộng "
                        "đồng vẫn dùng được — cân nhắc." if is_matte else "")),
             "recommend": True})
+    _sm = {"enable_support": "1", "support_interface_filament": str(sslot),
+           "support_interface_top_layers": "2",
+           "support_top_z_distance": z_sm, "support_bottom_z_distance": zb_sm,
+           "support_interface_spacing": "0", "support_interface_pattern": "concentric"}
     out.append({                                 # CUNG vat lieu — uu tien MAT DEP
         "id": "same_smooth", "label": f"Cùng {fam or 'nhựa'} — ưu tiên mặt đẹp (gỡ hơi chặt)",
-        "keys": {"enable_support": "1", "support_interface_filament": str(sslot),
-                 "support_interface_top_layers": "2",
-                 "support_top_z_distance": "0.15", "support_bottom_z_distance": "0.15",
-                 "support_interface_spacing": "0", "support_interface_pattern": "concentric"},
-        "why": ("Cùng nhựa DÍNH nhau nên luôn có đánh đổi. Z 0.15 + interface đặc (spacing 0) + 2 lớp "
+        "keys": _sm, "summary": _sum(_sm),
+        "why": (f"Cùng nhựa DÍNH nhau nên luôn có đánh đổi. Z {z_sm} + interface đặc (spacing 0) + 2 lớp "
                 "concentric → mặt tiếp xúc PHẲNG nhất, đổi lại gỡ hơi chặt (kìm/vặn nhẹ). Bật quạt "
-                "interface 100% giúp tách dễ hơn."),
+                "interface 100% giúp tách dễ hơn." + petg_tip),
         "recommend": not pslot})
+    _ez = {"enable_support": "1", "support_interface_filament": str(sslot),
+           "support_interface_top_layers": "1",
+           "support_top_z_distance": z_ez, "support_bottom_z_distance": zb_ez,
+           "support_interface_spacing": "0.3", "support_interface_pattern": "rectilinear_interlaced"}
     out.append({                                 # CUNG vat lieu — uu tien DE GO
         "id": "same_easy", "label": f"Cùng {fam or 'nhựa'} — ưu tiên dễ gỡ (mặt hơi rỗ)",
-        "keys": {"enable_support": "1", "support_interface_filament": str(sslot),
-                 "support_interface_top_layers": "1",
-                 "support_top_z_distance": "0.25", "support_bottom_z_distance": "0.2",
-                 "support_interface_spacing": "0.3", "support_interface_pattern": "rectilinear_interlaced"},
-        "why": ("Z 0.25 (khe rộng) + interface thưa (spacing 0.3) + 1 lớp rectilinear → support RỜI "
-                "hẳn, gỡ tay dễ, đổi lại mặt hẫng hơi rỗ. Cộng đồng: tăng Top Z 0.2→0.3 là cách dễ gỡ "
-                "nhất. Hợp mặt khuất / cần tháo nhanh."),
+        "keys": _ez, "summary": _sum(_ez),
+        "why": (f"Z {z_ez} (khe rộng) + interface thưa (spacing 0.3) + 1 lớp rectilinear → support RỜI "
+                "hẳn, gỡ tay dễ, đổi lại mặt hẫng hơi rỗ. Cộng đồng: tăng Top Z là cách dễ gỡ "
+                "nhất. Hợp mặt khuất / cần tháo nhanh." + petg_tip),
         "recommend": False})
     return out
 

@@ -2599,7 +2599,17 @@ function render(j){
       h+='<option value="" selected>Giữ support của file (mặc định)</option>';
       for(const s of ss) h+='<option value="'+esc(s.id)+'">'+esc(s.label)+(s.recommend?' ★ đề xuất':'')+'</option>';
       h+='</select>';
-      h+='<div id="supstratwhy" class="mut" style="margin-top:9px;font-size:12.5px;line-height:1.55">Chọn 1 cách ở trên để xem giải thích + áp khi Slice. Đề xuất theo khay hiện tại: <b>'+esc(rec.label)+'</b>.</div>';
+      /* HIEN het cac phuong an (cung loai + khac loai) kem GIA TRI + meo — user 2026-08-03 */
+      h+='<div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">';
+      for(const s of ss){
+        h+='<div style="border:1px solid #2a3550;border-radius:8px;padding:9px 11px">'
+          +'<div style="font-weight:600;font-size:12.5px">'+esc(s.label)+(s.recommend?' <span style="color:#4ade80">★ đề xuất</span>':'')+'</div>'
+          +(s.summary?'<div class="mut" style="font-size:11.5px;margin:4px 0;font-family:ui-monospace,monospace;color:#9fd0ff">'+esc(s.summary)+'</div>':'')
+          +'<div class="mut" style="font-size:11.5px;line-height:1.5">'+esc(s.why||'')+'</div>'
+          +'</div>';
+      }
+      h+='</div>';
+      h+='<div id="supstratwhy" class="mut" style="margin-top:9px;font-size:12.5px;line-height:1.55">Chọn 1 cách ở trên (dropdown) để ÁP vào ô Support khi Slice. Đề xuất theo khay hiện tại: <b>'+esc(rec.label)+'</b>.</div>';
       h+='<div class="mut" style="font-size:11.5px;margin-top:6px">Áp khi bấm <b>Slice + đẩy xuống</b>/<b>Slice tải về</b>. Nguồn: Bambu wiki (PLA↔PETG không dính → Z=0 bóc sạch) + forum.bambulab (cùng nhựa: đánh đổi mặt-vs-gỡ).</div>';
       h+='</div>';
     }
