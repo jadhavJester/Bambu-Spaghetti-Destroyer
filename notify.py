@@ -119,6 +119,29 @@ def _slack_photos(jpgs: list, caption: str = "") -> bool:
         return False
 
 
+def _ntfy_photos(jpgs: list, caption: str = "") -> bool:
+    """Gui ANH bao cao vao ntfy — dinh kem qua PUT (body = file, `Message` header =
+    caption). Header phai latin-1 nen smuggle UTF-8 (nhu _send_all). Loat nhieu frame ->
+    chon frame NET NHAT (JPEG lon nhat) de khoi spam nhieu thong bao."""
+    e = _env()
+    topic = e.get("NTFY_TOPIC")
+    jpgs = [j for j in (jpgs or []) if j]
+    if not (topic and jpgs):
+        return False
+    server = (e.get("NTFY_SERVER") or "https://ntfy.sh").rstrip("/")
+    cap = _plain(caption)[:300]
+    try:
+        req = urllib.request.Request(
+            f"{server}/{topic}", data=max(jpgs, key=len), method="PUT",
+            headers={"Filename": "cam.jpg", "Priority": "high",
+                     "Title": "Bambu A1".encode("utf-8").decode("latin-1"),
+                     "Message": cap.encode("utf-8").decode("latin-1")})
+        urllib.request.urlopen(req, timeout=20).read()
+        return True
+    except Exception:                                       # noqa: BLE001
+        return False
+
+
 def _post(url: str, data: bytes, headers: dict, tries: int = 3) -> None:
     """POST co RETRY — mang VN hay bop/chan api.telegram.org chap chon (do that:
     luc duoc luc 'handshake timed out'), thu lai 2-3 lan la qua duoc phan lon."""
@@ -269,12 +292,14 @@ def send_photos_telegram(jpgs: list, caption: str = "") -> bool:
     cho cac cho goi cu (bambu_web milestone line 134/1008/1027, telegram_bot analyze)."""
     ok = _tg_photos(jpgs, caption) if _on("TELEGRAM") else False
     _slack_photos(jpgs, caption)                              # Slack tu bo qua neu tat
+    _ntfy_photos(jpgs, caption)                               # ntfy: anh + caption theo muc
     return ok
 
 
 def send_photo_telegram(jpg: bytes, caption: str = "") -> bool:
     ok = _tg_photo(jpg, caption) if _on("TELEGRAM") else False
     _slack_photos([jpg], caption)
+    _ntfy_photos([jpg], caption)
     return ok
 
 
