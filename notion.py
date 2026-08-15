@@ -59,8 +59,9 @@ def _text(s: str) -> dict:
 
 
 # ──────────────────────────── GHI (create) ────────────────────────────
-def add_task(title: str, due: str | None = None, priority: str = "TB") -> str | None:
-    """Tao CONG VIEC. due = ISO ('2026-08-16' hoac '2026-08-16T09:00'). -> page id / None."""
+def add_task(title: str, due: str | None = None, priority: str = "TB",
+             nhom: str | None = None, project: str | None = None) -> str | None:
+    """Tao CONG VIEC. due = ISO. nhom = BIM/In 3D/... project = ten du an. -> id / None."""
     db = _env().get("NOTION_DB_TASKS")
     if not (enabled() and db and title):
         return None
@@ -69,6 +70,10 @@ def add_task(title: str, due: str | None = None, priority: str = "TB") -> str | 
         props["Ưu tiên"] = {"select": {"name": priority}}
     if due:
         props["Deadline"] = {"date": {"start": due}}
+    if nhom:
+        props["Nhóm"] = {"select": {"name": nhom}}
+    if project:
+        props["Dự án"] = _text(project)
     try:
         return _req("POST", "/pages",
                     {"parent": {"database_id": db}, "properties": props}).get("id")
@@ -93,13 +98,16 @@ def add_note(title: str, body: str = "", tags: list | None = None) -> str | None
 
 
 def add_expense(amount: float, item: str, category: str = "Khác",
-                date: str | None = None) -> str | None:
-    """Ghi CHI TIEU. amount = VND. date = 'YYYY-MM-DD' (mac dinh hom nay do caller truyen)."""
+                date: str | None = None, loai: str = "Chi",
+                dinh_ky: bool = False) -> str | None:
+    """Ghi CHI/THU. amount = VND. loai = Chi/Thu. dinh_ky = hoa don hang thang."""
     db = _env().get("NOTION_DB_EXPENSES")
     if not (enabled() and db and amount):
         return None
     props = {"Name": _title(item or "Chi"), "Số tiền": {"number": float(amount)},
-             "Phân loại": {"select": {"name": category or "Khác"}}}
+             "Phân loại": {"select": {"name": category or "Khác"}},
+             "Loại": {"select": {"name": loai or "Chi"}},
+             "Định kỳ": {"checkbox": bool(dinh_ky)}}
     if date:
         props["Ngày"] = {"date": {"start": date}}
     try:

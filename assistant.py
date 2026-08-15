@@ -59,12 +59,16 @@ INTENT_SYSTEM = """Bạn là bộ PHÂN TÍCH Ý ĐỊNH cho trợ lý cá nhân
   "intent": "task" | "note" | "expense" | "query" | "chat",
   "title":    string|null,      // tên việc / tiêu đề note / tên khoản chi
   "body":     string|null,      // nội dung note (nếu có)
-  "amount":   number|null,      // CHI TIÊU: số tiền VND (đã quy đổi: 35k=35000, 2tr=2000000)
-  "category": string|null,      // Ăn uống|Đi lại|Vật tư|Cà phê|Khác  (expense)
-  "due":      string|null,      // deadline ISO 8601 nếu suy được (vd "2026-08-16T09:00"), else null
+  "amount":   number|null,      // CHI/THU: số tiền VND (35k=35000, 2tr/2củ=2000000, 550k=550000)
+  "category": string|null,      // Điện|Nước|Wifi/Internet|Thuê nhà|Lương|Thưởng|Ăn uống|Cà phê|Đi lại|Vật tư|Mua sắm|Hoá đơn|Y tế|Giải trí|Khác
+  "loai":     "Chi"|"Thu"|null, // Lương/Thưởng/nhận tiền = Thu; còn lại = Chi
+  "dinh_ky":  true|false,       // hoá đơn hàng tháng (điện/nước/wifi/thuê nhà/lương/thưởng) = true
+  "due":      string|null,      // deadline ISO 8601 suy từ HÔM NAY (vd "2026-08-17T09:00"), else null
   "priority": "Cao"|"TB"|"Thấp"|null,
+  "nhom":     "BIM"|"In 3D"|"Cá nhân"|"Việc nhà"|"Học"|"Khác"|null,  // task: có nhắc "BIM" => "BIM"
+  "project":  string|null,      // task: tên dự án nếu nêu (vd "KSDA 2025")
   "query":    "expense_today"|"expense_week"|"expense_month"|"task_today"|"task_week"|"task_open"|null,
-  "missing":  string|null       // 1 câu hỏi lại nếu THIẾU thông tin bắt buộc (số tiền/deadline), else null
+  "missing":  string|null       // 1 câu hỏi lại nếu THIẾU (số tiền/deadline), else null
 }
 
 QUY TẮC:
@@ -105,6 +109,22 @@ def _vnd(n) -> str:
         return str(n)
 
 
+def _dmy(s: str) -> str:
+    """ISO 'YYYY-MM-DD[THH:MM…]' -> 'dd/mm/yy' (+ ' HH:MM' neu co gio khac 00:00)."""
+    if not s:
+        return ""
+    try:
+        y, m, d = s[:10].split("-")
+        out = f"{d}/{m}/{y[2:]}"
+        if "T" in s:
+            hm = s.split("T", 1)[1][:5]
+            if hm and hm != "00:00":
+                out += f" {hm}"
+        return out
+    except Exception:                                   # noqa: BLE001
+        return s
+
+
 def handle(text: str) -> str:
     """Xu ly 1 tin cho domain TRO LY. Chua co Notion token -> van xac nhan da hieu gi."""
     d = parse_intent(text)
@@ -117,19 +137,24 @@ def handle(text: str) -> str:
         amt, item, cat = d.get("amount"), (d.get("title") or "Chi"), (d.get("category") or "Khác")
         if not amt:
             return "❓ Anh chi bao nhiêu tiền ạ?"
+        loai = d.get("loai") or "Chi"
         if not notion.enabled():
-            return f"💸 (chưa nối Notion) Em hiểu: chi {_vnd(amt)} · {item} · {cat}"
-        ok = notion.add_expense(amt, item, cat, today)
-        return (f"💸 Đã lưu chi: {_vnd(amt)} · {item} · {cat}" if ok
+            return f"💸 (chưa nối Notion) Em hiểu: {loai.lower()} {_vnd(amt)} · {item} · {cat}"
+        ok = notion.add_expense(amt, item, cat, today, loai, bool(d.get("dinh_ky")))
+        icon = "💰" if loai == "Thu" else "💸"
+        return (f"{icon} Đã lưu {loai.lower()}: {_vnd(amt)} · {item} · {cat}"
+                + (" · định kỳ" if d.get("dinh_ky") else "") if ok
                 else "⚠️ Ghi Notion lỗi — kiểm tra chia sẻ DB Chi tiêu cho integration.")
 
     if intent == "task":
         title = d.get("title") or text
-        due = f" · hạn {d['due']}" if d.get("due") else ""
+        due = f" · hạn {_dmy(d['due'])}" if d.get("due") else ""
+        tag = f" · {d['nhom']}" if d.get("nhom") else ""
         if not notion.enabled():
-            return f"📝 (chưa nối Notion) Em hiểu việc: {title}{due}"
-        ok = notion.add_task(title, d.get("due"), d.get("priority") or "TB")
-        return f"✅ Đã lưu việc: {title}{due}" if ok else "⚠️ Ghi Notion lỗi — DB Công việc."
+            return f"📝 (chưa nối Notion) Em hiểu việc: {title}{due}{tag}"
+        ok = notion.add_task(title, d.get("due"), d.get("priority") or "TB",
+                             d.get("nhom"), d.get("project"))
+        return f"✅ Đã lưu việc: {title}{due}{tag}" if ok else "⚠️ Ghi Notion lỗi — DB Công việc."
 
     if intent == "note":
         title = d.get("title") or text[:60]
@@ -150,11 +175,12 @@ def handle(text: str) -> str:
                 start = today[:8] + "01"
             total, items = notion.sum_expenses(start, today)
             top = " · ".join(f"{i['item']} {_vnd(i['amount'])}" for i in items[:5]) or "chưa có"
-            return f"📊 Chi {start}→{today}: *{_vnd(total)}* ({len(items)} khoản)\n{top}"
+            rng = _dmy(today) if start == today else f"{_dmy(start)}→{_dmy(today)}"
+            return f"📊 Chi {rng}: *{_vnd(total)}* ({len(items)} khoản)\n{top}"
         rows = notion.query_tasks(status=None if q == "task_open" else "Chưa")
         if not rows:
             return "✅ Không có việc nào đang chờ."
-        lines = "\n".join(f"• {r['title']}" + (f" · hạn {r['due']}" if r["due"] else "")
+        lines = "\n".join(f"• {r['title']}" + (f" · hạn {_dmy(r['due'])}" if r["due"] else "")
                           for r in rows[:10])
         return f"🗓️ Việc cần làm ({len(rows)}):\n{lines}"
 
