@@ -22,6 +22,10 @@ _ASSIST = ("việc", "viec", "task", "deadline", "nhắc", "nhac", "lịch làm"
            "ca phe", "xăng", "xang", "ăn trưa", "an trua", "ăn sáng", "lương", "hoá đơn",
            "hoa don", "tổng chi", "hôm nay tiêu", "tuần này", "việc hôm nay", "todo")
 _ASSIST_PREFIX = ("/task", "/note", "/chi", "/viec", "/việc", "/tieu", "/tiêu", "/todo")
+# Tin hieu tro ly MANH khi o DAU cau -> ep assistant du sau do co tu khoa may in.
+_ASSIST_STRONG = ("ghi chú", "ghi chu", "note ", "nhắc ", "nhac ", "todo", "kế hoạch",
+                  "ke hoach", "việc ", "viec ", "lịch ", "lich ", "chi tiêu", "chi tieu",
+                  "chi phí", "chi phi", "ghi lại", "ghi lai", "lưu ý", "luu y")
 # Tu khoa nghieng ve MAY IN.
 _BAMBU = ("nhựa", "nhua", "nhiệt", "nhiet", "lớp", " lop", "support", "camera", "máy in",
           "may in", "bàn in", "ban in", " pla", "petg", "slice", "spaghetti", "bong lớp",
@@ -34,6 +38,10 @@ def classify(text: str) -> str:
     theo y dinh (task/note/expense/query -> assistant), tranh day nham cau viec sang may in."""
     t = (text or "").strip().lower()
     if any(t.startswith(p) for p in _ASSIST_PREFIX):
+        return "assistant"
+    # MO DAU bang tin hieu tro ly manh -> assistant NGAY (du cau co tu khoa may in nhu
+    # 'ghi chú dùng PETG…' — 'ghi chú' o dau thang PETG).
+    if any(t.startswith(p) for p in _ASSIST_STRONG):
         return "assistant"
     a = sum(1 for k in _ASSIST if k in t)
     b = sum(1 for k in _BAMBU if k in t)
