@@ -2726,6 +2726,10 @@ function render(j){
      +'3️⃣ Bấm in: map khay AMS đúng nhựa/màu như file khai báo.<br>'
      +'4️⃣ Slice → Preview: kéo thanh lớp, nhìn lớp interface đổi màu ngay dưới mặt hẫng là chuẩn.</div></div>';
     window.__preset=e.preset; window.__pname=(j.name||"file").replace(/\.[^.]+$/,"");
+    // AUTO dien TEN MODEL (file 3D) vao ten preset (user 2026-08-15: "ten model khi
+    // export luon auto") — khoi phai go tay; user van sua/xoa duoc.
+    const _ext=document.getElementById("pnameExtra");
+    if(_ext) _ext.value=window.__pname.replace(/[^A-Za-z0-9_-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,24);
     pnamePreview();
   }
 // Chen text user go vao ten preset NGAY TRUOC che do (Fast/Balanced/HighQuality):
@@ -2874,9 +2878,15 @@ function renderE2E(r){
 }
 function dlp(k){
   const d=window.__rep.modes[k];
-  const blob=new Blob([JSON.stringify(d.preset,null,4)],{type:"application/json"});
+  const p=Object.assign({},d.preset);                  // copy, khong sua ban goc
+  // AUTO kem TEN MODEL vao ten preset 3 che do (user 2026-08-15) — dong bo voi export chinh
+  const mdl=(window.__pname||window.__rep.name||"file").replace(/\.[^.]+$/,"")
+              .replace(/[^A-Za-z0-9_-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,24);
+  const full=pnameWith(p.name||("LP-"+k),mdl);          // chen ten model TRUOC che do
+  p.name=full; p.print_settings_id=full;
+  const blob=new Blob([JSON.stringify(p,null,4)],{type:"application/json"});
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
-  a.download=((d.preset&&d.preset.name)||((window.__rep.name||"file")+"-"+k))+".json";
+  a.download=full+".json";
   a.click(); URL.revokeObjectURL(a.href);
   toast("Đã tải — Import xong nhớ CHỌN preset ở dropdown Process (không tự áp)");
 }
