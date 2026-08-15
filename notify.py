@@ -84,15 +84,21 @@ def _slack_target() -> str:
 
 
 def _slack_text(title: str, body: str) -> None:
-    """Gui text vao Slack qua chat.postMessage (urllib — khong can slack_sdk)."""
+    """Gui text vao Slack qua chat.postMessage (urllib). BAY: Slack tra HTTP 200 kem
+    {ok:false, error} khi loi (bot bi kick / kenh sai) -> phai kiem `ok`, khong thi
+    log bao 'slack' GIA. 1 request, khong retry (tranh dang trung tin)."""
     e = _env()
     tok, chat = e.get("SLACK_BOT_TOKEN"), _slack_target()
     if not (tok and chat):
         return
-    _post("https://slack.com/api/chat.postMessage",
-          json.dumps({"channel": chat, "text": f"{title}\n{body}"[:3900]}).encode(),
-          {"Content-Type": "application/json; charset=utf-8",
-           "Authorization": f"Bearer {tok}"})
+    req = urllib.request.Request(
+        "https://slack.com/api/chat.postMessage",
+        data=json.dumps({"channel": chat, "text": f"{title}\n{body}"[:3900]}).encode(),
+        headers={"Content-Type": "application/json; charset=utf-8",
+                 "Authorization": f"Bearer {tok}"}, method="POST")
+    r = json.loads(urllib.request.urlopen(req, timeout=15).read())
+    if not r.get("ok"):
+        raise RuntimeError(f"slack API: {r.get('error')}")   # -> _send_all log 'slack:LOI'
 
 
 def _slack_photos(jpgs: list, caption: str = "") -> bool:
