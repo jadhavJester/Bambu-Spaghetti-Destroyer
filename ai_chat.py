@@ -286,6 +286,68 @@ def _chain(primary: str, vision: bool = False) -> list[str]:
     return chain
 
 
+# ── FIRECRAWL: cho bot TRA WEB khi cau hoi can du lieu moi (gia nhua, meo nha san
+#    xuat, loi la...). Chung cho ca Telegram + Slack (deu goi ask()). Key trong .env.
+_WEB_WORDS = ("tra web", "tra cứu", "tra cuu", "mới nhất", "moi nhat", "google",
+              "trên mạng", "tren mang", "internet", "tìm giúp", "tim giup", "cào",
+              "nhà sản xuất", "nha san xuat", "link", "@web", "search web", "tin tức",
+              "tin tuc", "khuyến cáo", "khuyen cao")
+
+
+def _firecrawl_key() -> str:
+    try:
+        env = printer_config._parse_dotenv(printer_config.env_path())  # noqa: SLF001
+    except Exception:                                   # noqa: BLE001
+        env = {}
+    return (env.get("FIRECRAWL_API_KEY") or os.environ.get("FIRECRAWL_API_KEY") or "").strip()
+
+
+# Nguon TIN CAY (uu tien len dau): wiki + forum NHA SAN XUAT, cong dong Bambu.
+_TRUST = ("wiki.bambulab.com", "forum.bambulab.com", "makerworld.com",
+          "reddit.com", "bambulab.com")
+# Social junk -> LOAI hoan toan (user chot: khong lay Instagram/Pinterest/FB/TikTok).
+_JUNK = ("instagram.com", "pinterest.", "facebook.com", "tiktok.com",
+         "twitter.com", "x.com", "youtube.com", "youtu.be")
+
+
+def web_search(query: str, limit: int = 4, timeout: int = 25) -> list[dict]:
+    """Tra web qua Firecrawl /v1/search, UU TIEN MakerWorld / Reddit r/BambuLab / Bambu
+    wiki + forum nha san xuat; LOAI social junk. -> [{title,url,md}]. Rong khi loi."""
+    key = _firecrawl_key()
+    if not key or not query.strip():
+        return []
+    q = f"{query} (Bambu Lab wiki OR MakerWorld OR Reddit r/BambuLab OR Bambu forum)"
+    try:
+        body = json.dumps({"query": q, "limit": 10}).encode()   # lay du de loc + xep hang
+        req = urllib.request.Request(
+            "https://api.firecrawl.dev/v1/search", data=body, method="POST",
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
+        r = json.loads(urllib.request.urlopen(req, timeout=timeout).read())
+    except Exception:                                   # noqa: BLE001
+        return []
+    raw = [it for it in (r.get("data") or [])                    # bo social junk truoc
+           if not any(j in (it.get("url") or "").lower() for j in _JUNK)]
+    raw.sort(key=lambda it: 0 if any(t in (it.get("url") or "").lower()
+                                     for t in _TRUST) else 1)     # nguon tin cay len dau
+    out = []
+    for it in raw[:limit]:
+        out.append({"title": (it.get("title") or "")[:90], "url": it.get("url") or "",
+                    "md": (it.get("description") or it.get("markdown") or "")[:500]})
+    return out
+
+
+def _web_context(question: str) -> str:
+    """Neu cau hoi co tu khoa 'tra web' + co key -> tra web, tra ve khoi ngu canh + nguon."""
+    if not _firecrawl_key() or not any(w in question.lower() for w in _WEB_WORDS):
+        return ""
+    hits = web_search(question)
+    if not hits:
+        return ""
+    body = "\n".join(f"• {h['title']} — {h['url']}\n  {h['md']}" for h in hits)
+    return ("[Kết quả TRA WEB mới (Firecrawl) — DÙNG để trả lời và TRÍCH NGUỒN (URL) ở "
+            "cuối]:\n" + body)
+
+
 def ask(question: str, context: str = "", system: str = SYSTEM,
         timeout: int = 45, max_tokens: int = 700, history: list | None = None) -> str | None:
     """Hoi 1 cau -> tra loi text; tu FALLBACK qua chuoi model, None khi het chuoi.
@@ -295,7 +357,13 @@ def ask(question: str, context: str = "", system: str = SYSTEM,
     key, model = _cfg()
     if not key or not question.strip():
         return None
-    user = question if not context else f"{question}\n\n[Bối cảnh máy in hiện tại]\n{context}"
+    parts = [question]
+    if context:
+        parts.append(f"[Bối cảnh máy in hiện tại]\n{context}")
+    web = _web_context(question)                        # Firecrawl: tra web khi cau hoi can
+    if web:
+        parts.append(web)
+    user = "\n\n".join(parts)
     msgs = [{"role": "system", "content": system}]
     if history:
         msgs += list(history)                           # nho cac luot truoc

@@ -42,6 +42,10 @@ _VISION_WORDS = ("ảnh", "anh ban in", "hình", "hinh", "nhìn", "nhin", "camer
 STOP_WORD = "DUNG XAC NHAN"
 _PEND = {"stop_until": 0.0}
 
+# "Cuoc goi ngoai" Slack bat buoc join_url tu dich vu g.oi ben 3 -> dung Jitsi Meet
+# (mien phi, khong can tai khoan). Phong co dinh de moi nguoi vao cung 1 cho.
+_JITSI_ROOM = "LPBambuHub-A1-59f2c1"
+
 _DIR = os.path.dirname(os.path.abspath(__file__))
 _TARGET_PATH = os.path.join(_DIR, "slack_target.txt")
 
@@ -62,6 +66,7 @@ _CMD = {
     "resume": {"resume", "tiếp tục", "tiep tuc", "tiếp", "tiep", "▶️"},
     "stop":   {"stop", "dừng hẳn", "dung han", "dừng hắn", "⏹"},
     "reset":  {"/reset", "reset", "/moi", "mới", "moi", "quên", "quen", "🧹"},
+    "call":   {"call", "/call", "gọi", "goi", "gọi video", "video", "📞"},
 }
 
 _TAGRE = re.compile(r"<[^>]+>")
@@ -194,7 +199,7 @@ def _menu_blocks() -> list:
             _btn("🤖 Model", "act:model"), _btn("⏸ Tạm dừng", "act:pause"),
             _btn("▶️ Tiếp tục", "act:resume")]},
         {"type": "actions", "elements": [
-            _btn("⏹ DỪNG HẲN", "act:stop", "danger"),
+            _btn("📞 Gọi video", "act:call"), _btn("⏹ DỪNG HẲN", "act:stop", "danger"),
             _btn("🧹 Xoá ngữ cảnh", "act:reset")]},
     ]
 
@@ -280,6 +285,18 @@ def _do(web, chat: str, key: str, hooks: dict) -> None:      # noqa: PLR0912
         _send(web, chat, "🧹 Đã XOÁ ngữ cảnh hội thoại. Câu sau bắt đầu chủ đề mới.")
     elif key == "model":
         _send(web, chat, "Chọn model AI", _model_blocks())
+    elif key == "call":
+        url = f"https://meet.jit.si/{_JITSI_ROOM}"
+        blocks = [
+            {"type": "section", "text": {"type": "mrkdwn",
+             "text": "📞 *Gọi video giám sát máy in* — bấm để vào phòng (Jitsi Meet, "
+                     "MIỄN PHÍ, không cần tài khoản). Mở camera điện thoại soi bàn in "
+                     "trực tiếp, hoặc gọi nhóm."}},
+            {"type": "actions", "elements": [
+                {"type": "button", "text": {"type": "plain_text", "text": "📞 Vào phòng gọi",
+                 "emoji": True}, "style": "primary", "url": url, "action_id": "call:open"}]},
+        ]
+        _send(web, chat, f"Phòng gọi video: {url}", blocks)
 
 
 def _set_model(web, chat: str, i: int) -> None:
