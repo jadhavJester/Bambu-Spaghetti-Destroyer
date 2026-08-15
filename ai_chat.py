@@ -45,7 +45,10 @@ _MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ai_model
 # Danh muc cho /model. (id OpenRouter, ten ngan, ghi chu). 'auto' = dung chuoi fallback.
 MODELS = [
     ("auto", "Tự động (fallback)", "thử DeepSeek→free→paid, model đổi theo cái nào đáp"),
-    ("deepseek/deepseek-v4-flash", "DeepSeek V4 Flash", "trả phí · kỹ thuật chuẩn, tiếng Việt sạch ~5s"),
+    ("deepseek/deepseek-v4-flash-0731", "DeepSeek V4 Flash (07-31 mới)",
+     "trả phí rẻ · kỹ thuật chuẩn, tiếng Việt sạch · nhanh ~1s"),
+    ("deepseek/deepseek-v4-pro-0813", "DeepSeek V4 Pro (08-13, mạnh nhất)",
+     "trả phí cao hơn ~6× · lý luận sâu, cho câu khó (chậm ~7s)"),
     ("nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", "Nemotron Nano", "MIỄN PHÍ · có vision"),
     ("openai/gpt-5-nano", "GPT-5 nano", "trả phí · nhanh"),
     ("google/gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite", "trả phí · nhìn ảnh tốt"),
@@ -233,8 +236,12 @@ def enabled() -> bool:
 
 
 def _call(model: str, key: str, messages: list, max_tokens: int, timeout: int) -> str | None:
-    body = json.dumps({"model": model, "messages": messages,
-                       "max_tokens": max_tokens}).encode("utf-8")
+    # TAT REASONING (bug 2026-08-15): DeepSeek V4 / Nemotron la model REASONING — token
+    # "suy nghi" AN HET max_tokens truoc khi kip sinh content -> finish=length, content
+    # RONG (~30% luot). Chatbot can tra loi THANG, khong can chain-of-thought. Tat
+    # reasoning: nhanh hon + content luon co. Model khong-reasoning bo qua param nay.
+    body = json.dumps({"model": model, "messages": messages, "max_tokens": max_tokens,
+                       "reasoning": {"enabled": False}}).encode("utf-8")
     req = urllib.request.Request(
         "https://openrouter.ai/api/v1/chat/completions", data=body, method="POST",
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
