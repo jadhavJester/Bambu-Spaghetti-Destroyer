@@ -2729,7 +2729,7 @@ function render(j){
     // AUTO dien TEN MODEL (file 3D) vao ten preset (user 2026-08-15: "ten model khi
     // export luon auto") — khoi phai go tay; user van sua/xoa duoc.
     const _ext=document.getElementById("pnameExtra");
-    if(_ext) _ext.value=window.__pname.replace(/[^A-Za-z0-9_-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,24);
+    if(_ext) _ext.value=window.__pname.replace(/[^A-Za-z0-9_-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,24).replace(/-+$/,"");
     pnamePreview();
   }
 // Chen text user go vao ten preset NGAY TRUOC che do (Fast/Balanced/HighQuality):
@@ -2881,7 +2881,7 @@ function dlp(k){
   const p=Object.assign({},d.preset);                  // copy, khong sua ban goc
   // AUTO kem TEN MODEL vao ten preset 3 che do (user 2026-08-15) — dong bo voi export chinh
   const mdl=(window.__pname||window.__rep.name||"file").replace(/\.[^.]+$/,"")
-              .replace(/[^A-Za-z0-9_-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,24);
+              .replace(/[^A-Za-z0-9_-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,24).replace(/-+$/,"");
   const full=pnameWith(p.name||("LP-"+k),mdl);          // chen ten model TRUOC che do
   p.name=full; p.print_settings_id=full;
   const blob=new Blob([JSON.stringify(p,null,4)],{type:"application/json"});
