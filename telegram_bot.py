@@ -25,6 +25,7 @@ import time
 import urllib.request
 import uuid
 
+import agent
 import ai_chat
 import notify
 import ui_tg
@@ -305,13 +306,14 @@ def _handle(token: str, chat: str, text: str, hooks: dict) -> None:  # noqa: PLR
                 _send(token, chat, _sig(a, "AI vision không phản hồi — thử lại sau."),
                       html=False)
                 return
-        # NHO NGU CANH: gui kem lich su cac luot truoc cua chat nay
-        a = ai_chat.ask(t, context=hooks["status"]() + "\n" + hooks["temps"](),
-                        history=_hist_get(chat))
+        # ROUTER (chung engine voi Slack): tu do -> BAMBU (may in) hoac ASSISTANT
+        # (viec/note/chi tieu -> Notion). Chi gan ten model cho cau AI may in.
+        dom, a = agent.handle(t, printer_ctx=hooks["status"]() + "\n" + hooks["temps"](),
+                              history=_hist_get(chat))
         if a:
             _hist_add(chat, t, a)
-        _send(token, chat, _sig(a, "AI không phản hồi (model free có thể hết lượt hôm "
-                                   "nay) — thử lại sau."), html=False)
+        _send(token, chat,
+              _sig(a, "AI không phản hồi — thử lại.") if dom == "bambu" else a, html=False)
 
 
 def _handle_safe(token: str, chat: str, text: str, hooks: dict) -> None:

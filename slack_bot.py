@@ -26,6 +26,7 @@ import re
 import threading
 import time
 
+import agent
 import ai_chat
 import notify
 import ui_tg
@@ -350,12 +351,13 @@ def _handle(web, chat: str, text: str, hooks: dict) -> None:
                 _hist_add(chat, t, a)
             _send(web, chat, _sig(a, "AI vision không phản hồi — thử lại sau."))
             return
-    a = ai_chat.ask(t, context=hooks["status"]() + "\n" + hooks["temps"](),
-                    history=_hist_get(chat))
+    # ROUTER: tu do -> domain BAMBU (may in, kem ngu canh + nho hoi thoai) hoac
+    # ASSISTANT (viec/note/chi tieu -> Notion). Chi gan ten model cho cau AI may in.
+    dom, a = agent.handle(t, printer_ctx=hooks["status"]() + "\n" + hooks["temps"](),
+                          history=_hist_get(chat))
     if a:
         _hist_add(chat, t, a)
-    _send(web, chat, _sig(a, "AI không phản hồi (model free có thể hết lượt hôm nay) — "
-                             "thử lại sau."))
+    _send(web, chat, _sig(a, "AI không phản hồi — thử lại.") if dom == "bambu" else a)
 
 
 def _handle_safe(web, chat: str, text: str, hooks: dict) -> None:
