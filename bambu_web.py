@@ -3445,7 +3445,8 @@ class H(BaseHTTPRequestHandler):
                 self._send(400, json.dumps({"ok": False, "msg": "Thiếu 'text'"}),
                            "application/json; charset=utf-8"); return
             try:
-                dom, reply = agent.handle(text, printer_ctx=_status_text())
+                dom, reply = agent.handle(
+                    text, printer_ctx=_status_text() + "\n" + _temps_text())
                 self._send(200, json.dumps({"ok": True, "domain": dom, "reply": reply},
                            ensure_ascii=False), "application/json; charset=utf-8")
             except Exception as ex:                       # noqa: BLE001
