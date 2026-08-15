@@ -1030,6 +1030,8 @@ def on_message(c, u, msg):
                         caption=f"📸 Thành phẩm: {fn}")
                 threading.Thread(target=_fin, daemon=True).start()
             elif gc == "FAILED":
+                notify.call_alert(f"Cảnh báo. Máy in Bambu A1 in thất bại. "
+                                  f"{fn}. Kiểm tra ngay.")   # GOI DIEN THAT (Twilio)
                 # ma loi da bao dong 10 tin o tren roi thi khoi lap lai 10 tin nua
                 if MILE["err"]:
                     notify.send("Bambu A1: In THẤT BẠI (đã báo động ở trên)",

@@ -218,6 +218,46 @@ def alarm(title: str, body: str, times: int = 10, gap_s: float = 3.0) -> None:
     threading.Thread(target=_run, daemon=True).start()
 
 
+def call_twilio(text: str) -> bool:
+    """GOI DIEN THAT qua Twilio Voice (doc canh bao bang giong noi vi-VN, lap 2 lan).
+    Auth = API Key (SK.../secret) + Account SID trong URL. Can DU 5 gia tri:
+    TWILIO_ACCOUNT_SID + TWILIO_API_KEY_SID + _SECRET + TWILIO_FROM (so Twilio) +
+    ALERT_PHONE (so nhan +84...). Thieu 1 -> bo qua (return False). 1 request, KHONG
+    retry (tranh goi trung)."""
+    import base64
+    import urllib.parse
+    e = _env()
+    acc, ks = e.get("TWILIO_ACCOUNT_SID"), e.get("TWILIO_API_KEY_SID")
+    sec, frm = e.get("TWILIO_API_KEY_SECRET"), e.get("TWILIO_FROM")
+    to = e.get("ALERT_PHONE")
+    if not all([acc, ks, sec, frm, to]):
+        return False
+    # Trial CHAN `Twiml` noi tuyen -> dung `Url` tro toi TwiML Bin (TWILIO_TWIML_URL);
+    # chua co thi dung URL demo cua Twilio (doc tieng Anh) de it nhat DIEN THOAI CO REO.
+    url = e.get("TWILIO_TWIML_URL") or "http://demo.twilio.com/docs/voice.xml"
+    data = urllib.parse.urlencode({"To": to, "From": frm, "Url": url}).encode()
+    auth = base64.b64encode(f"{ks}:{sec}".encode()).decode()
+    try:
+        req = urllib.request.Request(
+            f"https://api.twilio.com/2010-04-01/Accounts/{acc}/Calls.json",
+            data=data, method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded",
+                     "Authorization": f"Basic {auth}"})
+        urllib.request.urlopen(req, timeout=20).read()
+        _log(f"[twilio] GOI {to} OK")
+        return True
+    except Exception as ex:                                 # noqa: BLE001
+        _log(f"[twilio] LOI goi {to}: {type(ex).__name__}: {str(ex)[:200]}")
+        return False
+
+
+def call_alert(text: str) -> None:
+    """Goi dien canh bao (thread nen) — chi khi ENABLE_CALL!=0 + du cau hinh Twilio."""
+    if not _on("CALL"):
+        return
+    threading.Thread(target=call_twilio, args=(text,), daemon=True).start()
+
+
 def send_photos_telegram(jpgs: list, caption: str = "") -> bool:
     """FAN-OUT anh (milestone) sang MOI kenh dang bat: Telegram + Slack. TEN giu nguyen
     cho cac cho goi cu (bambu_web milestone line 134/1008/1027, telegram_bot analyze)."""
