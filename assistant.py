@@ -158,4 +158,12 @@ def handle(text: str) -> str:
                           for r in rows[:10])
         return f"🗓️ Việc cần làm ({len(rows)}):\n{lines}"
 
-    return ai_chat.ask(text, system=SYSTEM) or "Dạ?"   # chat thuong (giong tro ly)
+    # chat thuong — NHUNG neu chua noi Notion thi CAM bia du lieu cua anh Long
+    sys_p = SYSTEM
+    if not notion.enabled():
+        sys_p += ("\n\n[QUAN TRỌNG] Em CHƯA nối Notion → em KHÔNG có bất kỳ dữ liệu việc / "
+                  "chi tiêu / lịch / tracking nào của anh. Nếu anh hỏi về việc/chi tiêu/lịch/"
+                  "tracking/kế hoạch, CHỈ được trả lời đúng: 'Em chưa nối Notion nên chưa có "
+                  "dữ liệu của anh — nối Notion rồi em quản lý giúp.' TUYỆT ĐỐI KHÔNG bịa hay "
+                  "liệt kê việc/khoản chi mà anh chưa giao.")
+    return ai_chat.ask(text, system=sys_p) or "Dạ, em nghe đây."

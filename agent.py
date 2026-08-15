@@ -30,7 +30,8 @@ _BAMBU = ("nhựa", "nhua", "nhiệt", "nhiet", "lớp", " lop", "support", "cam
 
 
 def classify(text: str) -> str:
-    """Tra 'assistant' | 'bambu'. Prefix > dem tu khoa > mac dinh BAMBU (goc hub)."""
+    """Tra 'assistant' | 'bambu'. Prefix > dem tu khoa; MO HO (0-0) -> nho LLM phan loai
+    theo y dinh (task/note/expense/query -> assistant), tranh day nham cau viec sang may in."""
     t = (text or "").strip().lower()
     if any(t.startswith(p) for p in _ASSIST_PREFIX):
         return "assistant"
@@ -40,7 +41,14 @@ def classify(text: str) -> str:
         return "assistant"
     if b > a:
         return "bambu"
-    return "assistant" if a else "bambu"          # hoa/khong ro -> BAMBU
+    if a == 0:                                    # 0-0: khong ro -> hoi LLM y dinh
+        try:
+            if assistant.parse_intent(text).get("intent") in (
+                    "task", "note", "expense", "query"):
+                return "assistant"
+        except Exception:                         # noqa: BLE001
+            pass
+    return "bambu"                                # mac dinh / hoa -> BAMBU (goc hub)
 
 
 def handle(text: str, printer_ctx: str = "", history: list | None = None) -> tuple[str, str]:
