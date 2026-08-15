@@ -131,11 +131,12 @@ def _ntfy_photos(jpgs: list, caption: str = "") -> bool:
     server = (e.get("NTFY_SERVER") or "https://ntfy.sh").rstrip("/")
     cap = _plain(caption)[:300]
     try:
-        req = urllib.request.Request(
-            f"{server}/{topic}", data=max(jpgs, key=len), method="PUT",
-            headers={"Filename": "cam.jpg", "Priority": "high",
-                     "Title": "Bambu A1".encode("utf-8").decode("latin-1"),
-                     "Message": cap.encode("utf-8").decode("latin-1")})
+        hdr = {"Filename": "cam.jpg", "Priority": "high",
+               "Title": "Bambu A1".encode("utf-8").decode("latin-1"),
+               "Message": cap.encode("utf-8").decode("latin-1")}
+        hdr.update(_ntfy_action_headers())              # anh cung cham mo camera + nut
+        req = urllib.request.Request(f"{server}/{topic}", data=max(jpgs, key=len),
+                                     method="PUT", headers=hdr)
         urllib.request.urlopen(req, timeout=20).read()
         return True
     except Exception:                                       # noqa: BLE001
@@ -176,6 +177,27 @@ def _plain(s: str) -> str:
             .replace("&amp;", "&"))
 
 
+def _md_ntfy(s: str) -> str:
+    """HTML card -> Markdown cho ntfy (header Markdown:yes): <b>->**  <i>->_  <code>->`."""
+    s = s or ""
+    s = re.sub(r"</?b>", "**", s)
+    s = re.sub(r"</?i>", "_", s)
+    s = re.sub(r"</?code>", "`", s)
+    return (_TAG.sub("", s).replace("&lt;", "<").replace("&gt;", ">")
+            .replace("&amp;", "&"))
+
+
+def _ntfy_action_headers() -> dict:
+    """Header ntfy: CHAM thong bao -> mo camera (Click) + NUT Camera/Pause/Resume
+    (Actions). Emoji + tieng Viet trong header HTTP la latin-1 -> smuggle UTF-8. http
+    action = dien thoai goi hub qua Tailscale (can app Tailscale bat tren phone)."""
+    hub = hub_url().rstrip("/")
+    acts = (f"view, 📷 Camera, {hub}/, clear=true; "
+            f"http, ⏸ Tạm dừng, {hub}/api/cmd/pause, method=POST; "
+            f"http, ▶️ Tiếp tục, {hub}/api/cmd/resume, method=POST")
+    return {"Click": hub + "/", "Actions": acts.encode("utf-8").decode("latin-1")}
+
+
 def _send_all(title: str, body: str, urgent: bool, html: bool = True) -> list[str]:
     """Gui 1 tin di moi kenh. body co the chua the HTML (ui_tg.card) — Telegram
     render, ntfy/Discord tu lược the (user: 'moc tien do phai dep nhu tinh hinh in')."""
@@ -184,11 +206,13 @@ def _send_all(title: str, body: str, urgent: bool, html: bool = True) -> list[st
     t_plain, b_plain = _plain(title), _plain(body)
     if e.get("NTFY_TOPIC"):
         try:
-            _post(f"{e.get('NTFY_SERVER') or 'https://ntfy.sh'}/{e['NTFY_TOPIC']}",
-                  b_plain.encode("utf-8"),
-                  {"Title": t_plain.encode("utf-8").decode("latin-1"),  # header latin-1
+            hdr = {"Title": t_plain.encode("utf-8").decode("latin-1"),  # header latin-1
                    "Priority": "urgent" if urgent else "high",
-                   "Tags": "rotating_light" if urgent else "white_check_mark"})
+                   "Tags": "rotating_light" if urgent else "white_check_mark",
+                   "Markdown": "yes"}
+            hdr.update(_ntfy_action_headers())          # cham mo camera + nut dieu khien
+            _post(f"{e.get('NTFY_SERVER') or 'https://ntfy.sh'}/{e['NTFY_TOPIC']}",
+                  _md_ntfy(body).encode("utf-8"), hdr)
             sent.append("ntfy")
         except Exception as ex:                            # noqa: BLE001
             sent.append(f"ntfy:LOI {ex}")

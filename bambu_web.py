@@ -958,6 +958,12 @@ def on_message(c, u, msg):
                 notify.send(f"⏳ <b>MỐC {max(hit)}%</b>",
                             ui_tg.status_card(snap, True, weight=w,
                                               hub=notify.hub_url()))
+                # ANH camera moc tien do (thread rieng — camera grab ~8s KHONG nghen MQTT)
+                def _mphoto(p=max(hit), f=fn):
+                    jpg = camera_stream.get_frame(IP, CODE, wait_s=8)
+                    if jpg:
+                        notify.send_photo_telegram(jpg, caption=f"⏳ Mốc {p}% — {f}")
+                threading.Thread(target=_mphoto, daemon=True).start()
             # AI VISION tu soi camera o vung nguy hiem vat cao (65-90%) — thread
             # rieng (vision 6-30s, khong duoc nghen MQTT); chi 1 moc/lan.
             vhit = [m for m in VISION_CHECK_PCTS
