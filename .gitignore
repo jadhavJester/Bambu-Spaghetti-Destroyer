@@ -49,3 +49,6 @@ audit_out*.jsonl
 audit_run*.log
 hub_new.log
 ai_model.txt
+
+# Slack: kenh DM user nhan gan nhat (state runtime, bot tu ghi de day canh bao)
+slack_target.txt

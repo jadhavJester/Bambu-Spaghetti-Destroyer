@@ -37,6 +37,7 @@ import optimize_e2e
 import camera_stream
 import notify
 import ai_chat
+import slack_bot
 import telegram_bot
 import ui_tg
 
@@ -3631,13 +3632,19 @@ def _temps_text() -> str:
 
 def main():
     threading.Thread(target=mqtt_loop, daemon=True).start()
-    # Bot Telegram 2 chieu (nut nhanh + AI vision + dieu khien) — can .env
-    telegram_bot.start({
+    # Bot 2 chieu (nut nhanh + AI vision + dieu khien may in) — CUNG mot `hooks` cho ca
+    # Telegram va Slack (nao AI = ai_chat chung). Bat/tat tung kenh qua .env:
+    # ENABLE_TELEGRAM / ENABLE_SLACK (mac dinh '1'=bat; '0'=tat, khong can xoa token).
+    hooks = {
         "status": _status_text, "status_html": _status_html, "temps": _temps_text,
         "frame": lambda: camera_stream.get_frame(IP, CODE, wait_s=8),
         "thumb": _job_thumb, "cmd": cmd_print, "err": _err_code,
         "burst": _burst_frames,
-    })
+    }
+    if notify._on("TELEGRAM"):                               # noqa: SLF001
+        telegram_bot.start(hooks)
+    if notify._on("SLACK"):                                  # noqa: SLF001
+        slack_bot.start(hooks)
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), H)
     print("=" * 56)
     print("  BAMBU WEB DASHBOARD + DIEU KHIEN dang chay")

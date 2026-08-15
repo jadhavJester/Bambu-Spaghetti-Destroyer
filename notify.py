@@ -55,11 +55,62 @@ def channels() -> list[str]:
     out = []
     if e.get("NTFY_TOPIC"):
         out.append("ntfy")
-    if e.get("TELEGRAM_BOT_TOKEN") and e.get("TELEGRAM_CHAT_ID"):
+    if e.get("TELEGRAM_BOT_TOKEN") and e.get("TELEGRAM_CHAT_ID") and _on("TELEGRAM"):
         out.append("telegram")
     if e.get("DISCORD_WEBHOOK"):
         out.append("discord")
+    if e.get("SLACK_BOT_TOKEN") and _slack_target() and _on("SLACK"):
+        out.append("slack")
     return out
+
+
+def _on(name: str) -> bool:
+    """Bat/tat 1 kenh qua .env ENABLE_<NAME> (mac dinh '1'=bat; '0'=tat) — cho phep
+    'tam dung Telegram de test Slack' ma KHONG xoa token."""
+    return (_env().get(f"ENABLE_{name}") or "1").strip() != "0"
+
+
+def _slack_target() -> str:
+    """Kenh Slack de day CANH BAO: slack_target.txt (kenh DM user nhan gan nhat, do
+    slack_bot ghi) > SLACK_NOTIFY_CHANNEL (.env). Rong = user chua nhan bot lan nao."""
+    try:
+        c = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "slack_target.txt"), encoding="utf-8").read().strip()
+        if c:
+            return c
+    except OSError:
+        pass
+    return (_env().get("SLACK_NOTIFY_CHANNEL") or "").strip()
+
+
+def _slack_text(title: str, body: str) -> None:
+    """Gui text vao Slack qua chat.postMessage (urllib — khong can slack_sdk)."""
+    e = _env()
+    tok, chat = e.get("SLACK_BOT_TOKEN"), _slack_target()
+    if not (tok and chat):
+        return
+    _post("https://slack.com/api/chat.postMessage",
+          json.dumps({"channel": chat, "text": f"{title}\n{body}"[:3900]}).encode(),
+          {"Content-Type": "application/json; charset=utf-8",
+           "Authorization": f"Bearer {tok}"})
+
+
+def _slack_photos(jpgs: list, caption: str = "") -> bool:
+    """Gui ANH vao Slack (files_upload_v2 — dung slack_sdk da cai san cho don gian;
+    upload Slack moi la 3 buoc, urllib se rat dai)."""
+    e = _env()
+    tok, chat = e.get("SLACK_BOT_TOKEN"), _slack_target()
+    jpgs = [j for j in (jpgs or []) if j]
+    if not (tok and chat and jpgs) or not _on("SLACK"):
+        return False
+    try:
+        from slack_sdk.web import WebClient
+        ups = [{"file": j, "filename": f"cam{i}.jpg"} for i, j in enumerate(jpgs[:10])]
+        WebClient(token=tok).files_upload_v2(channel=chat, file_uploads=ups,
+                                             initial_comment=caption[:1500])
+        return True
+    except Exception:                                       # noqa: BLE001
+        return False
 
 
 def _post(url: str, data: bytes, headers: dict, tries: int = 3) -> None:
@@ -112,7 +163,7 @@ def _send_all(title: str, body: str, urgent: bool, html: bool = True) -> list[st
             sent.append("ntfy")
         except Exception as ex:                            # noqa: BLE001
             sent.append(f"ntfy:LOI {ex}")
-    if e.get("TELEGRAM_BOT_TOKEN") and e.get("TELEGRAM_CHAT_ID"):
+    if e.get("TELEGRAM_BOT_TOKEN") and e.get("TELEGRAM_CHAT_ID") and _on("TELEGRAM"):
         for attempt in (True, False):        # HTML loi (the la) -> gui lai dang tho
             use_html = html and attempt
             p = {"chat_id": e["TELEGRAM_CHAT_ID"],
@@ -137,6 +188,12 @@ def _send_all(title: str, body: str, urgent: bool, html: bool = True) -> list[st
             sent.append("discord")
         except Exception as ex:                            # noqa: BLE001
             sent.append(f"discord:LOI {ex}")
+    if _on("SLACK") and e.get("SLACK_BOT_TOKEN") and _slack_target():
+        try:
+            _slack_text(f"{'🚨' if urgent else '✅'} {t_plain}", b_plain)
+            sent.append("slack")
+        except Exception as ex:                            # noqa: BLE001
+            sent.append(f"slack:LOI {ex}")
     _log(f"[{t_plain}] -> {', '.join(sent) or 'KHONG CO KENH'}")
     return sent
 
@@ -162,16 +219,29 @@ def alarm(title: str, body: str, times: int = 10, gap_s: float = 3.0) -> None:
 
 
 def send_photos_telegram(jpgs: list, caption: str = "") -> bool:
-    """Gui NHIEU anh thanh 1 ALBUM (sendMediaGroup) — user thay DUNG cac frame AI da
-    nhin, tu doi chieu duoc (user hoi 2026-07-17: 'AI phan tich anh nao?'). Caption
-    gan vao anh dau. Loi -> fallback gui 1 anh net nhat."""
+    """FAN-OUT anh (milestone) sang MOI kenh dang bat: Telegram + Slack. TEN giu nguyen
+    cho cac cho goi cu (bambu_web milestone line 134/1008/1027, telegram_bot analyze)."""
+    ok = _tg_photos(jpgs, caption) if _on("TELEGRAM") else False
+    _slack_photos(jpgs, caption)                              # Slack tu bo qua neu tat
+    return ok
+
+
+def send_photo_telegram(jpg: bytes, caption: str = "") -> bool:
+    ok = _tg_photo(jpg, caption) if _on("TELEGRAM") else False
+    _slack_photos([jpg], caption)
+    return ok
+
+
+def _tg_photos(jpgs: list, caption: str = "") -> bool:
+    """Album Telegram (sendMediaGroup) — user thay DUNG cac frame AI da nhin, tu doi
+    chieu (user hoi 2026-07-17). Caption vao anh dau. Loi -> fallback 1 anh net nhat."""
     e = _env()
     tok, chat = e.get("TELEGRAM_BOT_TOKEN"), e.get("TELEGRAM_CHAT_ID")
     jpgs = [j for j in (jpgs or []) if j]
     if not (tok and chat and jpgs):
         return False
     if len(jpgs) == 1:
-        return send_photo_telegram(jpgs[0], caption)
+        return _tg_photo(jpgs[0], caption)
     import uuid
     b = uuid.uuid4().hex
     media, parts = [], []
@@ -195,11 +265,11 @@ def send_photos_telegram(jpgs: list, caption: str = "") -> bool:
               {"Content-Type": f"multipart/form-data; boundary={b}"})
         return True
     except Exception:                                   # noqa: BLE001
-        return send_photo_telegram(max(jpgs, key=len), caption)
+        return _tg_photo(max(jpgs, key=len), caption)
 
 
-def send_photo_telegram(jpg: bytes, caption: str = "") -> bool:
-    """Gui ANH (frame camera) vao Telegram — best-effort, loi thi thoi."""
+def _tg_photo(jpg: bytes, caption: str = "") -> bool:
+    """1 anh Telegram (sendPhoto) — best-effort, loi thi thoi."""
     e = _env()
     tok, chat = e.get("TELEGRAM_BOT_TOKEN"), e.get("TELEGRAM_CHAT_ID")
     if not (tok and chat and jpg):
