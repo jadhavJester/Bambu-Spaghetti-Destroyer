@@ -37,6 +37,7 @@ import optimize_e2e
 import camera_stream
 import notify
 import ai_chat
+import agent
 import slack_bot
 import telegram_bot
 import ui_tg
@@ -3427,6 +3428,31 @@ class H(BaseHTTPRequestHandler):
         return urlparse(raw).netloc == (self.headers.get("Host") or "")
 
     def do_POST(self):
+        # /api/agent = BACKEND API CONG KHAI (webhook / Cloudflare Tunnel / domain rieng
+        # goi toi). KHONG dung CSRF same-origin (caller o ngoai) ma dung KHOA API. Router
+        # phan loai domain: bambu (may in) vs assistant (viec/note/chi tieu). Dat TRUOC
+        # check same-origin.
+        if self.path == "/api/agent":
+            key = (notify._env().get("AGENT_API_KEY") or "").strip()   # noqa: SLF001
+            got = (self.headers.get("X-API-Key")
+                   or self.headers.get("Authorization", "").replace("Bearer", "")).strip()
+            if not key or got != key:
+                self._send(401, json.dumps({"ok": False, "msg": "Sai/thiếu API key"}),
+                           "application/json; charset=utf-8"); return
+            body = self._read_json()
+            text = (body.get("text") or body.get("q") or "").strip()[:2000]
+            if not text:
+                self._send(400, json.dumps({"ok": False, "msg": "Thiếu 'text'"}),
+                           "application/json; charset=utf-8"); return
+            try:
+                dom, reply = agent.handle(text, printer_ctx=_status_text())
+                self._send(200, json.dumps({"ok": True, "domain": dom, "reply": reply},
+                           ensure_ascii=False), "application/json; charset=utf-8")
+            except Exception as ex:                       # noqa: BLE001
+                self._send(500, json.dumps({"ok": False,
+                           "msg": f"{type(ex).__name__}: {str(ex)[:200]}"},
+                           ensure_ascii=False), "application/json; charset=utf-8")
+            return
         if not self._same_origin():
             self._send(403, json.dumps({"ok": False, "msg": "Origin không khớp — chặn CSRF"}),
                        "application/json; charset=utf-8")
