@@ -979,6 +979,16 @@ TROUBLESHOOT = {
         "NHIỆT: hạ dần 5-10°C từ số chuẩn (PLA Lite 220→210-215)",
         "Tăng retraction + quạt 100% (PLA thích tối đa)",
     ],
+    "Cạ sát / đầu phun kéo lê làm rỗ-bông bề mặt": [
+        "Z HOP: bật 'Z hop when retract' 0.2–0.4mm — nhấc mũi khi di chuyển, hết kéo lê qua "
+        "phần đã in (FIX #1: forum Bambu + Reddit). Vị trí: Filament ▸ Setting Overrides ▸ Retraction",
+        "Bật 'Retract when changing layer' → nhấc Z mỗi lần đổi lớp (forum Bambu 'nozzle dragging')",
+        "Bật 'Reduce crossing wall' (Quality) → đi vòng, khỏi lết mũi qua vành ngoài",
+        "PETG NẶNG hơn PLA: PETG mềm + dính + chảy dây → mũi hớt lên thành blob/BÔNG; PLA cứng "
+        "hơn chỉ để lại vệt bóng, ít bông — nhưng CÙNG cách sửa (z-hop)",
+        "Bề mặt GỒ do OVER-EXTRUDE nên mũi mới cà vào → calib Flow Rate + Pressure Advance (gốc rễ)",
+        "Infill GRID hay bị mũi đập (nhất là khi Ironing) → hub đã dùng Gyroid/Adaptive để tránh",
+    ],
     "Overhang rủ / xệ": [
         "Bật Speed ▸ Slow down for overhangs + overhang speed 0/50/30/10/10 (mặc định "
         "Bambu, wiki xác nhận) — đây là lý do chế độ Nhanh vẫn giữ overhang đẹp",

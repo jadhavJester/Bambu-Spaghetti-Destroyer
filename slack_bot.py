@@ -236,6 +236,7 @@ _TIPS = {
 _TS_LABEL = {
     "Mặt trên lấm tấm / lỗ li ti / vân thưa": "✨ Mặt trên đẹp",
     "Kéo sợi / xù lông / mặt rỗ li ti": "🕸️ Kéo sợi/xù lông",
+    "Cạ sát / đầu phun kéo lê làm rỗ-bông bề mặt": "🪒 Đầu phun cạ sát",
     "Overhang rủ / xệ": "🌉 Overhang rủ/xệ",
     "Lớp 1 bám kém / in quá nhanh (first layer & tốc độ)": "🧱 Lớp 1 & tốc độ",
     "PETG lớp đầu bông / tróc (in cao hoặc nhỏ)": "🫧 PETG lớp đầu bông",
