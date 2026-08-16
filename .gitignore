@@ -52,3 +52,4 @@ ai_model.txt
 
 # Slack: kenh DM user nhan gan nhat (state runtime, bot tu ghi de day canh bao)
 slack_target.txt
+server*.log

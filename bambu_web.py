@@ -2897,6 +2897,7 @@ function renderE2E(r){
   document.getElementById("e2eout").innerHTML=h;
 }
 function dlp(k){
+  _clog("dlp click k="+k+" hasRep="+(!!window.__rep)+" hasModes="+(!!(window.__rep&&window.__rep.modes))+" hasMode="+(!!(window.__rep&&window.__rep.modes&&window.__rep.modes[k])));
   if(!window.__rep||!window.__rep.modes||!window.__rep.modes[k]){ toast("Chưa có kết quả — So sánh lại"); return; }
   const p=Object.assign({},window.__rep.modes[k].preset);  // copy, khong sua ban goc
   // AUTO kem TEN MODEL vao ten preset 3 che do (user 2026-08-15) — dong bo voi export chinh
@@ -2907,24 +2908,38 @@ function dlp(k){
   toast("Đã tải: "+full+" — Import xong nhớ CHỌN preset ở dropdown Process (không tự áp)");
 }
 function kv(k,v){ return '<div class="kv"><span>'+k+'</span><b>'+esc(v)+'</b></div>'; }
+function pnameWith(name, extra){                        // chen TEN MODEL vao TRUOC che do
+  name = String(name || "LP-preset");
+  extra = String(extra || "").replace(/[^A-Za-z0-9_-]+/g,"-").replace(/^-+|-+$/g,"");
+  if(!extra || name.indexOf(extra) >= 0) return name;   // khong co model / da co -> giu nguyen
+  var m = name.match(/^(LP-.+?)-(Fast|Balanced|HighQuality|Draft|Quality)-(.+)$/);
+  return m ? (m[1]+"-"+extra+"-"+m[2]+"-"+m[3]) : (name+"-"+extra);
+}
 function _mdlName(){                                    // ten model (file 3D) da lam sach
   return (window.__pname||"").replace(/\.[^.]+$/,"")
     .replace(/[^A-Za-z0-9_-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,24).replace(/-+$/,"");
 }
+function _clog(m){ try{ fetch("/api/clientlog",{method:"POST",body:String(m)}); }catch(_){ } }
+window.onerror=function(m,u,l,c){ _clog("JSERR "+m+" @"+(u||"")+":"+l+":"+c); };
 function _saveJson(obj, fname){                         // tai kieu SERVER (form POST -> attachment)
-  let ifr=document.getElementById("_dlfr");            // iframe an de trang KHONG dieu huong
-  if(!ifr){ ifr=document.createElement("iframe"); ifr.id="_dlfr"; ifr.name="_dlfr";
-            ifr.style.display="none"; document.body.appendChild(ifr); }
-  const f=document.createElement("form"); f.method="POST"; f.action="/api/preset-dl";
-  f.target="_dlfr"; f.style.display="none";
-  const mk=function(n,v){ const t=document.createElement("textarea"); t.name=n; t.value=v; f.appendChild(t); };
-  mk("name",fname); mk("data",JSON.stringify(obj,null,4));
-  document.body.appendChild(f); f.submit();
-  setTimeout(function(){ f.remove(); }, 4000);
+  _clog("saveJson start "+fname);
+  try{
+    let ifr=document.getElementById("_dlfr");           // iframe an de trang KHONG dieu huong
+    if(!ifr){ ifr=document.createElement("iframe"); ifr.id="_dlfr"; ifr.name="_dlfr";
+              ifr.style.display="none"; document.body.appendChild(ifr); }
+    const f=document.createElement("form"); f.method="POST"; f.action="/api/preset-dl";
+    f.target="_dlfr"; f.style.display="none";
+    const mk=function(n,v){ const t=document.createElement("textarea"); t.name=n; t.value=v; f.appendChild(t); };
+    mk("name",fname); mk("data",JSON.stringify(obj,null,4));
+    document.body.appendChild(f); f.submit();
+    _clog("saveJson submitted "+fname);
+    setTimeout(function(){ f.remove(); }, 4000);
+  }catch(e){ _clog("saveJson ERR "+e); alert("Lỗi tải preset: "+e); }
 }
 function dl(){
+  _clog("dl click hasPreset="+(!!(window.__preset&&window.__preset.name)));
   const p=Object.assign({},window.__preset||{});       // copy, khong sua ban goc
-  if(!p.name){ toast("Chưa có preset — bấm Phân tích lại file"); return; }
+  if(!p.name){ _clog("dl no preset"); toast("Chưa có preset — bấm Phân tích lại file"); return; }
   const ex=((document.getElementById("pnameExtra")||{}).value||"").trim() || _mdlName();  // o trong -> TEN MODEL
   const full=pnameWith(p.name,ex);
   p.name=full; p.print_settings_id=full;                // ten trong Bambu = model + che do
@@ -3472,6 +3487,12 @@ class H(BaseHTTPRequestHandler):
                            "msg": f"{type(ex).__name__}: {str(ex)[:200]}"},
                            ensure_ascii=False), "application/json; charset=utf-8")
             return
+        if self.path == "/api/clientlog":               # CHAN DOAN: log loi JS client
+            n = int(self.headers.get("Content-Length", 0) or 0)
+            msg = self.rfile.read(n).decode("utf-8", "ignore")[:500] if n else ""
+            notify._log(f"[clientlog] {msg}")            # noqa: SLF001
+            self._send(200, "{}", "application/json")
+            return
         if self.path == "/api/preset-dl":
             # TAI kieu SERVER (bulletproof — khong dinh quirk blob/revokeURL cua trinh
             # duyet lam "tai treo"). Form POST tu trang -> tra attachment. Chi echo data
@@ -3482,6 +3503,7 @@ class H(BaseHTTPRequestHandler):
             raw_nm = (q.get("name", ["preset.json"]) or ["preset.json"])[0]
             nm = ("".join(c for c in raw_nm if c.isalnum() or c in "._- ")[:120]) or "preset.json"
             b = ((q.get("data", ["{}"]) or ["{}"])[0]).encode("utf-8")
+            notify._log(f"[preset-dl] hit -> {nm} ({len(b)} bytes)")   # noqa: SLF001 — chan doan
             self.send_response(200)
             self.send_header("Content-Type", "application/octet-stream")
             self.send_header("Content-Disposition", f'attachment; filename="{nm}"')
