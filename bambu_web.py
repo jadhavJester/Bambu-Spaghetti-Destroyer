@@ -2209,6 +2209,23 @@ ANALYZE_PAGE = r"""<!doctype html><html lang="vi"><head>
 </details>
 
 <details style="max-width:900px;margin:14px auto 0;padding:0 16px">
+  <summary style="cursor:pointer;font-weight:700;font-size:15px">📐 Lắp 2 part KHÍT / LỎNG (nắp-lọ, hoa-khuôn) — chỉnh khe hở ±mm</summary>
+  <div class="mut" style="margin-top:10px;line-height:1.7">
+  <b>Triệu chứng:</b> part cắm vào khuôn / lỗ <b>khít quá không lọt</b>, hoặc lỏng rơi ra.<br>
+  <b>Cần chỉnh:</b> <b>X-Y size compensation</b> — KHÔNG phải Scale (Scale đổi cả kích thước + méo hoa văn).<br><br>
+  <b>Vị trí Bambu Studio → tab Quality ▸ mục Precision:</b><br>
+  • <b>X-Y contour compensation</b> (biên ngoài): <b>ÂM</b> = co model nhỏ lại → lọt dễ · <b>DƯƠNG</b> = nở ra, chặt hơn.
+  Ví dụ bông hoa khít quá → <b>-0.2</b> (co mỗi cạnh 0.2mm ≈ giảm 0.4mm đường kính; chỉ hơi khít thì -0.1 đủ).<br>
+  • <b>X-Y hole compensation</b> (lỗ): <b>DƯƠNG</b> = lỗ to ra → trục / part cắm vào dễ hơn.<br><br>
+  <b>Khe hở lắp ghép FDM chuẩn (Bambu A1, nozzle 0.4):</b> khít bấm nhẹ ~0.1 · trượt êm ~0.2 · lỏng thoải mái ~0.3mm.<br>
+  <b>Chỉnh RIÊNG 1 part</b> (chỉ hoa, không đụng khuôn): phải chuột lên object → <b>Add settings</b> → thêm
+  <i>X-Y contour compensation</i> → đặt -0.2 riêng cho part đó.<br>
+  ⚠️ Compensation giữ nguyên chi tiết/hoa văn; Scale −% thì méo cả bông hoa. Khít nhiều thì hạ tiếp -0.05 mỗi lần.<br>
+  🔗 Kiểm chứng: wiki.bambulab.com (Precision) — in thử <b>1 cánh hoa</b> trước khi in cả bộ.
+  </div>
+</details>
+
+<details style="max-width:900px;margin:14px auto 0;padding:0 16px">
   <summary style="cursor:pointer;font-weight:700;font-size:15px">📚 Fix mặt trên lấm tấm / lỗ li ti / vân thưa — vị trí chỉnh chính xác</summary>
   <div class="mut" style="margin-top:10px;line-height:1.7">
   <b>Triệu chứng:</b> mặt trên cùng có lỗ li ti, lấm tấm, vân thưa (đường in không khít nhau),
@@ -2894,12 +2911,16 @@ function _mdlName(){                                    // ten model (file 3D) d
   return (window.__pname||"").replace(/\.[^.]+$/,"")
     .replace(/[^A-Za-z0-9_-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,24).replace(/-+$/,"");
 }
-function _saveJson(obj, fname){                         // tai an toan: vao DOM + hoan revoke
-  const blob=new Blob([JSON.stringify(obj,null,4)],{type:"application/json"});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement("a"); a.href=url; a.download=fname;
-  document.body.appendChild(a); a.click();
-  setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 1500);  // revoke som = huy tai
+function _saveJson(obj, fname){                         // tai kieu SERVER (form POST -> attachment)
+  let ifr=document.getElementById("_dlfr");            // iframe an de trang KHONG dieu huong
+  if(!ifr){ ifr=document.createElement("iframe"); ifr.id="_dlfr"; ifr.name="_dlfr";
+            ifr.style.display="none"; document.body.appendChild(ifr); }
+  const f=document.createElement("form"); f.method="POST"; f.action="/api/preset-dl";
+  f.target="_dlfr"; f.style.display="none";
+  const mk=function(n,v){ const t=document.createElement("textarea"); t.name=n; t.value=v; f.appendChild(t); };
+  mk("name",fname); mk("data",JSON.stringify(obj,null,4));
+  document.body.appendChild(f); f.submit();
+  setTimeout(function(){ f.remove(); }, 4000);
 }
 function dl(){
   const p=Object.assign({},window.__preset||{});       // copy, khong sua ban goc
@@ -3450,6 +3471,23 @@ class H(BaseHTTPRequestHandler):
                 self._send(500, json.dumps({"ok": False,
                            "msg": f"{type(ex).__name__}: {str(ex)[:200]}"},
                            ensure_ascii=False), "application/json; charset=utf-8")
+            return
+        if self.path == "/api/preset-dl":
+            # TAI kieu SERVER (bulletproof — khong dinh quirk blob/revokeURL cua trinh
+            # duyet lam "tai treo"). Form POST tu trang -> tra attachment. Chi echo data
+            # user vua gui (JSON preset cua chinh ho) nen an toan.
+            import urllib.parse as _up
+            n = int(self.headers.get("Content-Length", 0) or 0)
+            q = _up.parse_qs(self.rfile.read(n).decode("utf-8", "ignore")) if n else {}
+            raw_nm = (q.get("name", ["preset.json"]) or ["preset.json"])[0]
+            nm = ("".join(c for c in raw_nm if c.isalnum() or c in "._- ")[:120]) or "preset.json"
+            b = ((q.get("data", ["{}"]) or ["{}"])[0]).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition", f'attachment; filename="{nm}"')
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
             return
         if not self._same_origin():
             self._send(403, json.dumps({"ok": False, "msg": "Origin không khớp — chặn CSRF"}),
