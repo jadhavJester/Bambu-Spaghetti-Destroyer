@@ -186,6 +186,68 @@ def _btn(label: str, action_id: str, style: str = "") -> dict:
     return b
 
 
+# ─────────────── KHO MEO TINH (bam la doc ngay, KHONG can AI) ───────────────
+# User chot: "cho meo in phai hien option de chon doc" — AI free chan/rong nen
+# meo co dinh (kien thuc may-doc-lap) tra tuc thi; con meo theo NHUA/BAN IN dang
+# chay thi de nut rieng '🤖 Meo theo may (AI)'.
+_TIPS = {
+    "sup_dual": (
+        "🧊 Support 2 nhựa (PLA+PETG)",
+        "*🧊 Support bóc sạch — mặt dưới nhẵn như mặt trên (2 nhựa)*\n"
+        "PLA và PETG *không dính hoá học* → ép sát 0mm vẫn bóc rời.\n"
+        "• Support/raft interface = *nhựa đối ứng* (thân PLA → interface PETG, và ngược lại)\n"
+        "• Top Z distance = *0* · Bottom Z = 0\n"
+        "• Top interface spacing = *0* (đặc 100%)\n"
+        "• Interface pattern = Rectilinear Interlaced · 2–3 lớp\n"
+        "• Tắt Independent support layer height\n"
+        "• Nhớ *Flush nhiều* khi đổi: PLA→PETG ~650 · PETG→PLA ~250\n"
+        "⚠️ CÙNG loại mà để Z=0 = hàn chết, gỡ ra vỡ mặt."),
+    "sup_pla": (
+        "🟢 Support 1 nhựa PLA",
+        "*🟢 Full support bằng PLA (1 nhựa)*\n"
+        "Không có nhựa đối ứng thì chọn 1 trong 2 bộ (3 thông số đi kèm nhau):\n"
+        "• *Mặt đẹp*: Top Z = *0.15* · spacing 0 · 2 lớp Concentric\n"
+        "• *Dễ gỡ*: Top Z = *0.25* · spacing 0.3 · 1 lớp Rectilinear\n"
+        "💡 *Mẹo ít vết mà khỏi đổi nhựa*: Interface pattern = *Grid (lưới)* + Top Z ~*0.04* "
+        "— lưới ít điểm tiếp xúc nên bóc nhẹ, để lại rất ít dấu.\n"
+        "⚠️ 0.04 mấp mé hàn dính → in thử 1 miếng có overhang canh theo máy trước."),
+    "fit": (
+        "🔩 Lắp khít/lỏng (âm dương)",
+        "*🔩 Lắp 2 part khít/lỏng — đầu âm dương*\n"
+        "Chỉnh *X-Y size compensation* (KHÔNG dùng Scale — Scale méo hoa văn). "
+        "Vị trí: Quality ▸ Precision.\n"
+        "• X-Y contour compensation: *ÂM* = co nhỏ → lọt dễ · *DƯƠNG* = nở → chặt "
+        "(hoa khít quá đặt -0.2 ≈ giảm 0.4mm đường kính)\n"
+        "• X-Y hole compensation: *DƯƠNG* = lỗ to ra\n"
+        "• Khe hở chuẩn: khít 0.1 · êm 0.2 · lỏng 0.3mm\n"
+        "🎯 Thiết kế: chừa sẵn ~0.2mm trong model + in *clearance test*; *bo góc 1–2mm* "
+        "chống phồng/lồi (elephant foot) = thủ phạm #1 gây kẹt.\n"
+        "Chỉnh RIÊNG 1 part: chuột phải object ▸ Add settings."),
+    "top": (
+        "✨ Mặt trên đẹp",
+        "*✨ Mặt trên đẹp (chống sọc / thiếu lớp / pillowing)*\n"
+        "• Tốc độ top ≤ *60% trần chảy* (PLA ~150, PETG ~100, Matte ~85) — thủ phạm #1 gây sọc\n"
+        "• Số lớp top ≥ 4 (hoặc top shell ≥ 1mm)\n"
+        "• top_surface_pattern = *Monotonic*\n"
+        "• Line width top 0.42 (đừng để mỏng 0.25)\n"
+        "• Ruột ≥ 15% để lớp top không võng vào khe infill\n"
+        "• Calib *Flow Ratio* + *Pressure Advance*\n"
+        "Ủi (ironing) là phương án CUỐI (PETG dễ blob)."),
+}
+
+
+def _tip_menu_blocks() -> list:
+    tip_btns = [_btn(lbl, f"act:tip:{k}") for k, (lbl, _t) in _TIPS.items()]
+    blocks = [{"type": "section", "text": {"type": "mrkdwn",
+              "text": "*💡 Mẹo in* — bấm 1 mục để ĐỌC ngay (nội dung cố định, không cần AI):"}}]
+    for j in range(0, len(tip_btns), 5):                      # <=5 nut / actions block
+        blocks.append({"type": "actions", "elements": tip_btns[j:j + 5]})
+    blocks.append({"type": "actions", "elements": [
+        _btn("🤖 Mẹo theo máy (AI)", "act:tip:ai", "primary"),
+        _btn("⬅️ Menu", "act:menu")]})
+    return blocks
+
+
 def _menu_blocks() -> list:
     return [
         {"type": "section", "text": {"type": "mrkdwn",
@@ -254,11 +316,18 @@ def _do(web, chat: str, key: str, hooks: dict) -> None:      # noqa: PLR0912
         if not _upload_many(web, chat, imgs, cap):           # CA LOAT anh AI da nhin
             _send(web, chat, a)
     elif key == "tip":
-        a = ai_chat.ask("Cho 3 mẹo NGẮN, cụ thể, đúng với nhựa và bản in đang chạy "
-                        "(theo bối cảnh). Mỗi mẹo 1 dòng bắt đầu bằng 💡.",
-                        context=hooks["status"]() + "\n" + hooks["temps"]()) \
-            or "AI không phản hồi — thử lại sau."
-        _send(web, chat, a)
+        _send(web, chat, "💡 Chọn mẹo để đọc", _tip_menu_blocks())
+    elif key.startswith("tip:"):
+        tk = key[4:]
+        if tk == "ai":                                        # meo DONG theo nhua/ban in dang chay
+            a = ai_chat.ask("Cho 3 mẹo NGẮN, cụ thể, đúng với nhựa và bản in đang chạy "
+                            "(theo bối cảnh). Mỗi mẹo 1 dòng bắt đầu bằng 💡.",
+                            context=hooks["status"]() + "\n" + hooks["temps"]()) \
+                or "AI không phản hồi — thử lại sau, hoặc bấm 1 mẹo cố định ở trên."
+            _send(web, chat, a)
+        else:                                                 # meo TINH: doc tuc thi
+            item = _TIPS.get(tk)
+            _send(web, chat, item[1] if item else "Mẹo không có — bấm 💡 Mẹo để chọn lại.")
     elif key == "err":
         err = (hooks.get("err") or (lambda: 0))()
         if not err:
