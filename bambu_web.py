@@ -2322,11 +2322,7 @@ async function dlFil(){
         ?'✓ inherits <b>'+esc(j.inherits)+'</b> — tên preset gốc ĐÃ XÁC MINH'
         :'⚠ inherits <b>'+esc(j.inherits)+'</b> — tên suy luận, nếu Studio báo lỗi import hãy kiểm tra tên preset gốc')
       +'<br>'+esc(j.why||'');
-    const blob=new Blob([JSON.stringify(j.preset,null,4)],{type:"application/json"});
-    const a=document.createElement("a");
-    a.href=URL.createObjectURL(blob);
-    a.download=((j.preset&&j.preset.name)||"LP-filament-safe")+".json";
-    a.click(); URL.revokeObjectURL(a.href);
+    _saveJson(j.preset, ((j.preset&&j.preset.name)||"LP-filament-safe")+".json");
     toast("Đã tải preset "+(j.key||sel.value));
   }catch(e){toast("Lỗi tải preset: "+e);}
 }
@@ -2337,10 +2333,7 @@ async function dlFilFix(){
     const j=await (await fetch("/api/filpreset?fil="+encodeURIComponent(fc.key))).json();
     if(!j.ok){toast(j.msg||"Không sinh được preset");return;}
     if(fc.color){ j.preset.filament_colour=[fc.color]; j.preset.default_filament_colour=[fc.color]; }
-    const blob=new Blob([JSON.stringify(j.preset,null,4)],{type:"application/json"});
-    const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
-    a.download=((j.preset&&j.preset.name)||("LP-"+fc.key))+".json";
-    a.click(); URL.revokeObjectURL(a.href);
+    _saveJson(j.preset, ((j.preset&&j.preset.name)||("LP-"+fc.key))+".json");
     toast("Đã tải preset nhựa ĐÃ SỬA: "+(j.key||fc.key));
   }catch(e){toast("Lỗi tải preset: "+e);}
 }
@@ -2887,30 +2880,34 @@ function renderE2E(r){
   document.getElementById("e2eout").innerHTML=h;
 }
 function dlp(k){
-  const d=window.__rep.modes[k];
-  const p=Object.assign({},d.preset);                  // copy, khong sua ban goc
+  if(!window.__rep||!window.__rep.modes||!window.__rep.modes[k]){ toast("Chưa có kết quả — So sánh lại"); return; }
+  const p=Object.assign({},window.__rep.modes[k].preset);  // copy, khong sua ban goc
   // AUTO kem TEN MODEL vao ten preset 3 che do (user 2026-08-15) — dong bo voi export chinh
-  const mdl=(window.__pname||window.__rep.name||"file").replace(/\.[^.]+$/,"")
-              .replace(/[^A-Za-z0-9_-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,24).replace(/-+$/,"");
+  const mdl=_mdlName() || (window.__rep.name||"").replace(/\.[^.]+$/,"");
   const full=pnameWith(p.name||("LP-"+k),mdl);          // chen ten model TRUOC che do
   p.name=full; p.print_settings_id=full;
-  const blob=new Blob([JSON.stringify(p,null,4)],{type:"application/json"});
-  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
-  a.download=full+".json";
-  a.click(); URL.revokeObjectURL(a.href);
-  toast("Đã tải — Import xong nhớ CHỌN preset ở dropdown Process (không tự áp)");
+  _saveJson(p, full+".json");
+  toast("Đã tải: "+full+" — Import xong nhớ CHỌN preset ở dropdown Process (không tự áp)");
 }
 function kv(k,v){ return '<div class="kv"><span>'+k+'</span><b>'+esc(v)+'</b></div>'; }
+function _mdlName(){                                    // ten model (file 3D) da lam sach
+  return (window.__pname||"").replace(/\.[^.]+$/,"")
+    .replace(/[^A-Za-z0-9_-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,24).replace(/-+$/,"");
+}
+function _saveJson(obj, fname){                         // tai an toan: vao DOM + hoan revoke
+  const blob=new Blob([JSON.stringify(obj,null,4)],{type:"application/json"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a"); a.href=url; a.download=fname;
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 1500);  // revoke som = huy tai
+}
 function dl(){
-  const p=Object.assign({},window.__preset);           // copy, khong sua ban goc
-  const ex=(document.getElementById("pnameExtra")||{}).value||"";
-  const full=pnameWith(p.name||(window.__pname+"-OPT-process"),ex);
-  p.name=full; p.print_settings_id=full;                // ten trong Bambu = ten user go
-  const blob=new Blob([JSON.stringify(p,null,4)],{type:"application/json"});
-  const a=document.createElement("a");
-  a.href=URL.createObjectURL(blob);
-  a.download=full+".json";
-  a.click(); URL.revokeObjectURL(a.href);
+  const p=Object.assign({},window.__preset||{});       // copy, khong sua ban goc
+  if(!p.name){ toast("Chưa có preset — bấm Phân tích lại file"); return; }
+  const ex=((document.getElementById("pnameExtra")||{}).value||"").trim() || _mdlName();  // o trong -> TEN MODEL
+  const full=pnameWith(p.name,ex);
+  p.name=full; p.print_settings_id=full;                // ten trong Bambu = model + che do
+  _saveJson(p, full+".json");
   toast("Đã tải: "+full+" — Import xong nhớ CHỌN preset ở dropdown Process");
 }
 /* Bước 1: SLICE LẠI với thông số đã chỉnh (giữ file, KHÔNG đẩy) -> hiện thời gian/nhựa mới */
