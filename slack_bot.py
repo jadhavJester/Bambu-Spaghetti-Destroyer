@@ -220,6 +220,12 @@ _TIPS = {
         "(hoa khít quá đặt -0.2 ≈ giảm 0.4mm đường kính)\n"
         "• X-Y hole compensation: *DƯƠNG* = lỗ to ra\n"
         "• Khe hở chuẩn: khít 0.1 · êm 0.2 · lỏng 0.3mm\n"
+        "🔩 *REN (ốc-vít) — phân biệt:*\n"
+        "  – *Ren TRONG* = ren nằm trong LỖ (đai ốc, lỗ bắt vít) → chặt thì *X-Y hole "
+        "compensation +0.1* (nhẹ hơn để +0.05; đây là bán kính → đường kính +0.2)\n"
+        "  – *Ren NGOÀI* = ren trên THÂN/TRỤC (bu lông, cọc ren) → chặt thì *X-Y contour "
+        "compensation −0.1* (co thân lại)\n"
+        "  Chuẩn: +0.1 vặn êm · +0.15 lỏng. In ren ĐỨNG trục Z + vát miệng ren cho dễ vào.\n"
         "🎯 Thiết kế: chừa sẵn ~0.2mm trong model + in *clearance test*; *bo góc 1–2mm* "
         "chống phồng/lồi (elephant foot) = thủ phạm #1 gây kẹt.\n"
         "Chỉnh RIÊNG 1 part: chuột phải object ▸ Add settings."),
