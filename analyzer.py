@@ -989,6 +989,15 @@ TROUBLESHOOT = {
         "Lưu ý: Arachne MẤT 'smooth overhang transition' (chỉ có ở Classic) — cần mặt "
         "hẫng mượt hơn thin-wall thì đổi Wall generator = Classic",
     ],
+    "Lớp 1 bám kém / in quá nhanh (first layer & tốc độ)": [
+        "First layer speed = 50 mm/s là số Bambu ĐÃ TUNE cho A1 — bám kém thì ĐỪNG hạ tốc "
+        "(chậm quá cũng rỗ mặt đáy)",
+        "Bám kém → TĂNG Quality ▸ initial_layer_print_height 0.20→0.24mm (đáy dày, ăn bàn chắc hơn)",
+        "Chỉnh tốc độ lớp 1: Speed ▸ Initial layer speed (lớp 1) + Initial layer infill",
+        "Bàn sạch (dầu tay là thủ phạm #1) + Z-offset đúng + brim 5mm nếu đáy nhỏ/tỉ lệ lật cao",
+        "IN QUÁ NHANH = đặt tốc vượt TRẦN CHẢY (mvs ÷ (layer×line width)) → số ẢO, máy tự hãm; "
+        "nhựa ra không kịp thì line hở → sọc/bong lớp. Giữ ≤ trần chảy (PLA ~150, PETG ~100, Matte ~85)",
+    ],
     "Vênh / bong mép (warping)": [
         "PLA/PETG trên PEI nhám: rửa bàn (dầu tay là thủ phạm #1), brim outer_only 5mm",
         "ABS/ASA trên A1 khung HỞ: BẮT BUỘC draft_shield + skirt 2 vòng + brim rộng "

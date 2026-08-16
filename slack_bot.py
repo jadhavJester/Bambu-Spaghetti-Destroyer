@@ -223,25 +223,51 @@ _TIPS = {
         "🎯 Thiết kế: chừa sẵn ~0.2mm trong model + in *clearance test*; *bo góc 1–2mm* "
         "chống phồng/lồi (elephant foot) = thủ phạm #1 gây kẹt.\n"
         "Chỉnh RIÊNG 1 part: chuột phải object ▸ Add settings."),
-    "top": (
-        "✨ Mặt trên đẹp",
-        "*✨ Mặt trên đẹp (chống sọc / thiếu lớp / pillowing)*\n"
-        "• Tốc độ top ≤ *60% trần chảy* (PLA ~150, PETG ~100, Matte ~85) — thủ phạm #1 gây sọc\n"
-        "• Số lớp top ≥ 4 (hoặc top shell ≥ 1mm)\n"
-        "• top_surface_pattern = *Monotonic*\n"
-        "• Line width top 0.42 (đừng để mỏng 0.25)\n"
-        "• Ruột ≥ 15% để lớp top không võng vào khe infill\n"
-        "• Calib *Flow Ratio* + *Pressure Advance*\n"
-        "Ủi (ironing) là phương án CUỐI (PETG dễ blob)."),
+}
+
+# Nhan nut NGAN cho tung nhom TROUBLESHOOT (nguon = analyzer, 1 su that). Key la
+# thu tu (symptom string) trong analyzer.TROUBLESHOOT; thieu -> tu cat 24 ky tu.
+_TS_LABEL = {
+    "Mặt trên lấm tấm / lỗ li ti / vân thưa": "✨ Mặt trên đẹp",
+    "Kéo sợi / xù lông / mặt rỗ li ti": "🕸️ Kéo sợi/xù lông",
+    "Overhang rủ / xệ": "🌉 Overhang rủ/xệ",
+    "Lớp 1 bám kém / in quá nhanh (first layer & tốc độ)": "🧱 Lớp 1 & tốc độ",
+    "Vênh / bong mép (warping)": "🪵 Vênh/bong mép",
+    "Kẹt nhựa / thiếu đùn (mã 1200-8007)": "🔥 Kẹt/thiếu đùn",
+    "Lệch trục / nghiêng ~2/3 chiều cao": "🗼 Lệch trục",
+    "Brim khó gỡ / để lại via": "🩹 Brim khó gỡ",
+    "Support xấu / khó bóc / sẹo mặt": "🧊 Support khó bóc",
 }
 
 
+def _ts_items() -> list:
+    """Bang su co->sua (analyzer.TROUBLESHOOT) — kho meo DA KIEM CHUNG, 1 nguon."""
+    try:
+        import analyzer
+        return list(analyzer.TROUBLESHOOT.items())
+    except Exception:                                        # noqa: BLE001
+        return []
+
+
+def _ts_text(i: int) -> str | None:
+    items = _ts_items()
+    if not (0 <= i < len(items)):
+        return None
+    sym, steps = items[i]
+    return f"*💡 {sym}*\n" + "\n".join(f"{n}. {s}" for n, s in enumerate(steps, 1))
+
+
 def _tip_menu_blocks() -> list:
-    tip_btns = [_btn(lbl, f"act:tip:{k}") for k, (lbl, _t) in _TIPS.items()]
+    # TOAN BO meo tu kho tai lieu (TROUBLESHOOT) + 3 card recipe rieng cua hub
+    ts_btns = [_btn(_TS_LABEL.get(sym, sym[:24]), f"act:ts:{i}")
+               for i, (sym, _s) in enumerate(_ts_items())]
+    extra_btns = [_btn(lbl, f"act:tip:{k}") for k, (lbl, _t) in _TIPS.items()]
+    all_btns = ts_btns + extra_btns
     blocks = [{"type": "section", "text": {"type": "mrkdwn",
-              "text": "*💡 Mẹo in* — bấm 1 mục để ĐỌC ngay (nội dung cố định, không cần AI):"}}]
-    for j in range(0, len(tip_btns), 5):                      # <=5 nut / actions block
-        blocks.append({"type": "actions", "elements": tip_btns[j:j + 5]})
+              "text": "*💡 Mẹo in — kho đã kiểm chứng* · bấm 1 mục để ĐỌC ngay "
+                      "(không cần AI):"}}]
+    for j in range(0, len(all_btns), 5):                     # <=5 nut / actions block
+        blocks.append({"type": "actions", "elements": all_btns[j:j + 5]})
     blocks.append({"type": "actions", "elements": [
         _btn("🤖 Mẹo theo máy (AI)", "act:tip:ai", "primary"),
         _btn("⬅️ Menu", "act:menu")]})
@@ -317,6 +343,12 @@ def _do(web, chat: str, key: str, hooks: dict) -> None:      # noqa: PLR0912
             _send(web, chat, a)
     elif key == "tip":
         _send(web, chat, "💡 Chọn mẹo để đọc", _tip_menu_blocks())
+    elif key.startswith("ts:"):                              # meo tu kho TROUBLESHOOT
+        try:
+            txt = _ts_text(int(key[3:]))
+        except ValueError:
+            txt = None
+        _send(web, chat, txt or "Mẹo không có — bấm 💡 Mẹo để chọn lại.")
     elif key.startswith("tip:"):
         tk = key[4:]
         if tk == "ai":                                        # meo DONG theo nhua/ban in dang chay
