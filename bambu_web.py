@@ -1228,6 +1228,9 @@ PAGE = r"""<!doctype html><html lang="vi"><head>
  .chip{display:flex;align-items:center;gap:6px;background:#0c111a;border:1px solid var(--line);
    border-radius:99px;padding:4px 10px 4px 5px;font-size:11.5px;font-weight:700}
  .chip i{width:15px;height:15px;border-radius:50%;border:1px solid rgba(255,255,255,.25);display:block}
+ .qa{background:#101826;color:var(--txt);border:1px solid var(--line);border-radius:99px;
+   padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;transition:.15s}
+ .qa:hover{border-color:var(--acc);background:#16202f}
  .up{padding:13px;border-radius:14px;background:linear-gradient(160deg,var(--card2),var(--card1));
    box-shadow:var(--sh),var(--hl);margin:2px 0 12px}
  .ubtn{width:100%;background:linear-gradient(160deg,#38bdf8,#0284c7);color:#fff;border:none;border-radius:12px;
@@ -1412,6 +1415,14 @@ async function saveCfg(){
 
 <div class="card">
   <h3 style="margin-top:0">🤖 Hỏi đáp AI <span class="mut" style="font-size:12px">· Nemotron free · biết trạng thái máy + kho số đã kiểm chứng của hub</span></h3>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 10px">
+    <button class="qa" onclick="aiQuick('Cách làm support bóc sạch, mặt dưới nhẵn như mặt trên?')">🧊 Support bóc sạch</button>
+    <button class="qa" onclick="aiQuick('Làm full support bằng PLA (1 nhựa) không để lại vết thì set thế nào?')">🟢 Support 1 nhựa PLA</button>
+    <button class="qa" onclick="aiQuick('Lắp 2 part đầu âm dương khít quá hoặc lỏng thì chỉnh khe hở ở đâu?')">🔩 Lắp khít/lỏng (âm dương)</button>
+    <button class="qa" onclick="aiQuick('Mặt trên bị sọc / thiếu lớp thì sửa thế nào?')">✨ Mặt trên đẹp</button>
+    <button class="qa" onclick="aiQuick('Nhựa đang lắp để nhiệt nozzle và bàn bao nhiêu?')">🌡️ Nhiệt nhựa đang lắp</button>
+    <button class="qa" onclick="aiQuick('Máy in tới đâu rồi?')">🖨️ In tới đâu?</button>
+  </div>
   <div id="ailog" style="max-height:280px;overflow-y:auto;font-size:13px;line-height:1.6"></div>
   <div style="display:flex;gap:8px;margin-top:8px">
     <input id="aiq" placeholder="Vd: in tới đâu rồi? / PLA Matte để nhiệt bao nhiêu?"
@@ -1554,6 +1565,7 @@ function aiFmt(s){
       ? '<span style="color:#f87171;font-weight:600">'+ln+'</span>' : ln;
   }).join("\n");
 }
+function aiQuick(t){ var i=document.getElementById("aiq"); if(i){ i.value=t; aiAsk(); i.focus(); } }
 async function aiAsk(){
   const inp=document.getElementById("aiq"), log=document.getElementById("ailog");
   const q=(inp.value||"").trim(); if(!q||AIBUSY) return;
@@ -2199,7 +2211,12 @@ ANALYZE_PAGE = r"""<!doctype html><html lang="vi"><head>
   • Interface pattern = Rectilinear Interlaced · Top interface layers = 2-3<br>
   → Bóc được nhưng mặt dưới hơi rỗ — đó là giới hạn vật lý của cùng nhựa; muốn bóng
   như mặt trên bắt buộc phải có nhựa đối ứng. Hub tự set đúng bộ này khi phân tích file.<br><br>
-  ⏱️ Giá phải trả (trick PETG): single-nozzle đổi nhựa mỗi lớp interface → tốn thời gian + nhựa purge.<br><br>
+  <b>🧪 Biến thể 1 NHỰA "gần như không vết" (mẹo cộng đồng Art3dmaker):</b> giữ TẤT CẢ PLA
+  nhưng đổi <b>Interface pattern = Grid (lưới)</b> + <b>Top Z distance ≈ 0.04mm</b> (khe cực nhỏ)
+  — lưới ít điểm tiếp xúc nên bóc nhẹ, để lại rất ít dấu; <b>khỏi đổi nhựa, khỏi purge</b>.
+  ⚠️ 0.04 là mấp mé hàn dính → in thử 1 miếng có overhang canh theo máy trước khi in model lớn.<br><br>
+  ⏱️ Giá phải trả (trick PETG): single-nozzle đổi nhựa mỗi lớp interface → tốn thời gian + nhựa purge
+  (cộng đồng dùng <b>Flushing volumes ~800</b> khi đổi PLA↔PETG để không lẫn màu/vật liệu).<br><br>
   <b>An toàn trước khi in model lớn (case thất bại cộng đồng đã quét):</b><br>
   🧪 Lần đầu dùng trick: in <b>thử 1 miếng nhỏ có overhang</b> (~20 phút) trước, đừng đặt cược model 8 tiếng.<br>
   🔍 Import preset xong phải <b>chọn nó ở dropdown Process</b> — import KHÔNG tự áp; bóc không ra đa số do preset chưa được chọn, Z distance vẫn của preset cũ.<br>
@@ -2220,7 +2237,10 @@ ANALYZE_PAGE = r"""<!doctype html><html lang="vi"><head>
   <b>Khe hở lắp ghép FDM chuẩn (Bambu A1, nozzle 0.4):</b> khít bấm nhẹ ~0.1 · trượt êm ~0.2 · lỏng thoải mái ~0.3mm.<br>
   <b>Chỉnh RIÊNG 1 part</b> (chỉ hoa, không đụng khuôn): phải chuột lên object → <b>Add settings</b> → thêm
   <i>X-Y contour compensation</i> → đặt -0.2 riêng cho part đó.<br>
-  ⚠️ Compensation giữ nguyên chi tiết/hoa văn; Scale −% thì méo cả bông hoa. Khít nhiều thì hạ tiếp -0.05 mỗi lần.<br>
+  ⚠️ Compensation giữ nguyên chi tiết/hoa văn; Scale −% thì méo cả bông hoa. Khít nhiều thì hạ tiếp -0.05 mỗi lần.<br><br>
+  <b>🎯 2 mẹo THIẾT KẾ cho đầu âm-dương / khớp lắp (khi tự vẽ part):</b><br>
+  • Chừa sẵn khe <b>~0.2mm ngay trong model</b> + in 1 mẫu <b>"clearance test"</b> (dải khe 0.10 / 0.15 / 0.20 / 0.25 / 0.30) → biết giới hạn THẬT của máy mình, in 1 lần dùng mãi.<br>
+  • <b>Bo tròn / vát cạnh chỗ khớp 1-2mm</b> → góc nhọn hay bị phồng/lồi (elephant foot) là <b>thủ phạm #1</b> làm kẹt; bo góc giảm hẳn.<br>
   🔗 Kiểm chứng: wiki.bambulab.com (Precision) — in thử <b>1 cánh hoa</b> trước khi in cả bộ.
   </div>
 </details>
