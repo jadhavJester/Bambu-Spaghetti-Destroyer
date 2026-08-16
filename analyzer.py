@@ -2064,27 +2064,30 @@ def make_preset(r: dict, name: str = "OPT", mode: str = "balanced",
     p["infill_wall_overlap"] = "15%"     # AUDIT: 25% (dinh thang) phinh vo/lon size thanh mong; 15% = mac dinh Bambu
     p["seam_gap"] = "10%"                        # wiki: 0-15% khi PA tune tot
 
-    # 11) LOP DAU — giu 50 mm/s (so Bambu tune cho A1: PEI nham + input shaping);
-    #     ha toc do chi lam LAU chu khong bam hon. Bam kem thi tang DO DAY lop dau:
-    #     lop day hon = chiu do venh ban tot hon + bead rong hon -> diet tich bam lon hon.
-    p["initial_layer_speed"] = ["50"]
+    # 11) LOP DAU — TOC DO + DO DAY theo DO KHO BAM:
+    #   - Ca DE (day rong, thap, khong PETG): 50 mm/s (so Bambu tune cho A1: PEI + input shaping).
+    #   - Ca KHO (day <8cm2 / ti le lat >3 / PETG): HA 30 mm/s cho bead kip bond + tang DO DAY
+    #     lop dau -> chong bong/troc (forum Bambu + TROUBLESHOOT 'ha 25-30'; cham lop dau bam
+    #     manh nhat khi dien tich nho). PETG mep hay hot len giua chung nen LUON cham.
+    hard_adh = (bed < 8) or (ratio > 3) or is_petg
+    p["initial_layer_speed"] = ["30"] if hard_adh else ["50"]
     if bed < 8 or ratio > 3:
         p["initial_layer_print_height"] = "0.24"
-        why.append(f"Lớp đầu DÀY 0.24mm (thay vì hạ tốc độ): đáy chỉ {bed} cm² / tỉ lệ lật "
-                   f"{ratio:.1f} — lớp dày hơn nuốt độ vênh bàn + bead bè rộng hơn → bám chắc "
-                   f"hơn mà KHÔNG chậm đi. Tốc độ giữ 50 mm/s chuẩn A1.")
+        why.append(f"Lớp đầu CHẬM 30 mm/s + DÀY 0.24mm: đáy chỉ {bed} cm² / tỉ lệ lật {ratio:.1f} "
+                   f"— chậm cho bead kịp bám bàn + lớp dày nuốt độ vênh, bead bè rộng → chống "
+                   f"bong/tróc. (50 mm/s chuẩn A1 chỉ đủ cho đáy rộng, thấp.)")
     else:
         # AUDIT 2026-07-19: SAN lop dau >= 0.20mm (Bambu ship 0.20 cho MOI profile ke ca
         # "0.16 Optimal" — lop dau day nuot do venh ban + bead rong hon = BAM chac hon).
-        # Truoc day = lh (0.16 o Dep) -> mong hon san Bambu -> de bong goc/venh. Khong bao
-        # gio de lop dau < 0.20 tren A1.
         ilh = max(0.20, lh)
         p["initial_layer_print_height"] = f"{ilh:g}"
-        why.append(f"Lớp đầu 50 mm/s / {ilh:g}mm (Bambu sàn 0.20 cho MỌI profile): đáy {bed} cm² "
+        spd = "30" if is_petg else "50"
+        why.append(f"Lớp đầu {spd} mm/s / {ilh:g}mm (Bambu sàn 0.20 cho MỌI profile): đáy {bed} cm² "
                    f"bám ổn trên PEI nhám. "
+                   + ("PETG HẠ 30 mm/s vì mép hay hớt lên giữa chừng (forum Bambu) — cùng đáy rộng "
+                      "cũng nên chậm. " if is_petg else "")
                    + (f"Chế độ Đẹp layer {lh:g}mm nhưng lớp đầu GIỮ 0.20 (dày hơn = nuốt vênh + "
-                      f"bám chắc, không hạ 0.16 như trước — chống bong góc)." if lh < 0.20 else
-                      "25 mm/s là số cũ cho bàn kính — chỉ chậm chứ không bám thêm."))
+                      f"bám chắc, không hạ 0.16 — chống bong góc)." if lh < 0.20 else ""))
 
     # 12) VAT CAO -> TU GIAM GIA TOC + TOC DI CHUYEN.
     #     Doc tu tall_rules() = NGUON DUY NHAT (preset + tip + guide deu lay tu day).
@@ -2195,7 +2198,8 @@ FIL_EXPORT = {
     "PETG ECO":  {"inherits": "Bambu PETG Basic @BBL A1", "verified": True,   # TINMORRY eco
                   "safe": {"nozzle_temperature": "240", "filament_max_volumetric_speed": "14",
                            "filament_flow_ratio": "0.94", "hot_plate_temp": "80",
-                           "filament_retraction_length": "1.2", "filament_retraction_speed": "30"},
+                           "filament_retraction_length": "1.2", "filament_retraction_speed": "30",
+                           "close_fan_the_first_x_layers": "1"},   # PETG: quat OFF lop dau -> bam chac
                   "why": "TINMORRY PETG-Eco. Hang cong bo voi 230-260°C, ban 75-90°C; cong dong "
                          "Bambu chot 230/ban 80 -> lay 240 (giua khoang, an toan cho A1) + ban 80. "
                          "mvs 14 lay DUNG tu nguoi dung PETG-Eco that tren forum Bambu ('slow down "
@@ -2208,14 +2212,16 @@ FIL_EXPORT = {
                            # RETRACTION (video PETG SETTINGS nhan manh + cong dong A1): PETG
                            # KEO SOI manh -> tang len 1.2mm + HA toc rut 30mm/s (cham hon PLA
                            # de soi dut gon, khong vuot); den/xam lo soi ro nhat.
-                           "filament_retraction_length": "1.2", "filament_retraction_speed": "30"},
+                           "filament_retraction_length": "1.2", "filament_retraction_speed": "30",
+                           "close_fan_the_first_x_layers": "1"},   # PETG: quat OFF lop dau -> bam chac
                   "why": "Bambu PETG Basic (13 / 0.94 / ban 70) + RETRACTION 1.2mm@30mm/s chong keo "
                          "soi (cong dong A1 + video). Den/xam: giu KHO (PETG hut am -> soi), ban 70 "
                          "textured PEI DINH RAT CHAT -> boi keo lam CHONG DINH (de go), dung len 80."},
     "PETG":      {"inherits": "Bambu PETG HF @BBL A1", "verified": True,     # ✓ audit 2 tang
                   "safe": {"nozzle_temperature": "240", "filament_max_volumetric_speed": "18",
                            "filament_flow_ratio": "0.94", "hot_plate_temp": "70",
-                           "filament_retraction_length": "1.2", "filament_retraction_speed": "30"},
+                           "filament_retraction_length": "1.2", "filament_retraction_speed": "30",
+                           "close_fan_the_first_x_layers": "1"},   # PETG: quat OFF lop dau -> bam chac
                   "why": "Bambu PETG HF (240 / mvs 18 / 0.94 / ban 70, audit 2 tang) + RETRACTION "
                          "1.2mm@30mm/s chong keo soi. Cuon HOT ngoai (vd omega PETG 265-279°C, min260/"
                          "max285) chay nong hon -> chi nang nhiet neu ĐUNG cuon do, mac dinh giu Bambu."},
