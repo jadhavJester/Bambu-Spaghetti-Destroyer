@@ -998,6 +998,15 @@ TROUBLESHOOT = {
         "IN QUÁ NHANH = đặt tốc vượt TRẦN CHẢY (mvs ÷ (layer×line width)) → số ẢO, máy tự hãm; "
         "nhựa ra không kịp thì line hở → sọc/bong lớp. Giữ ≤ trần chảy (PLA ~150, PETG ~100, Matte ~85)",
     ],
+    "PETG lớp đầu bông / tróc (in cao hoặc nhỏ)": [
+        "SẤY PETG 65°C/6-8h — ẨM là thủ phạm #1 gây bông/sủi bọt (AMS Lite KHÔNG sấy); giữ khô cả khi in (forum Bambu)",
+        "BRIM 5mm; góc nhọn thêm Brim Ears (mouse ears) — fix ĐÃ XÁC NHẬN cho ca tróc GIỮA CHỪNG ở vật đáy nhỏ/cao (forum Bambu t/76986)",
+        "Bàn 70→80°C (đen/xám/eco để 80) + bàn SẠCH (dầu tay #1); dính PEI textured quá chặt thì bôi keo làm lớp ngăn cho dễ gỡ",
+        "Lớp đầu: TẮT quạt + nozzle +10°C so lớp sau → bám chắc, hết tróc (cộng đồng Reddit/ender3v2)",
+        "initial_layer_print_height 0.24 + first layer 50 mm/s (Bambu-tune); vẫn tróc thì hạ ~25-30 mm/s cho bám",
+        "Vật CAO / tỉ lệ lật >3: brim 8mm + giảm accel 6000→4000/3000 (rung bàn A1 nhấc mép) + úp mặt phẳng nhất xuống bàn",
+        "A1 KHUNG HỞ: tránh gió lùa / điều hoà thổi vào (co ngót đột ngột → vênh mép) — forum Bambu 'warping and lifting'",
+    ],
     "Vênh / bong mép (warping)": [
         "PLA/PETG trên PEI nhám: rửa bàn (dầu tay là thủ phạm #1), brim outer_only 5mm",
         "ABS/ASA trên A1 khung HỞ: BẮT BUỘC draft_shield + skirt 2 vòng + brim rộng "

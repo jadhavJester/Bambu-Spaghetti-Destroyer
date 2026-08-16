@@ -232,6 +232,7 @@ _TS_LABEL = {
     "Kéo sợi / xù lông / mặt rỗ li ti": "🕸️ Kéo sợi/xù lông",
     "Overhang rủ / xệ": "🌉 Overhang rủ/xệ",
     "Lớp 1 bám kém / in quá nhanh (first layer & tốc độ)": "🧱 Lớp 1 & tốc độ",
+    "PETG lớp đầu bông / tróc (in cao hoặc nhỏ)": "🫧 PETG lớp đầu bông",
     "Vênh / bong mép (warping)": "🪵 Vênh/bong mép",
     "Kẹt nhựa / thiếu đùn (mã 1200-8007)": "🔥 Kẹt/thiếu đùn",
     "Lệch trục / nghiêng ~2/3 chiều cao": "🗼 Lệch trục",
