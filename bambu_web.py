@@ -1418,6 +1418,7 @@ async function saveCfg(){
   <div style="display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 10px">
     <button class="qa" onclick="aiQuick('Cách làm support bóc sạch, mặt dưới nhẵn như mặt trên?')">🧊 Support bóc sạch</button>
     <button class="qa" onclick="aiQuick('Làm full support bằng PLA (1 nhựa) không để lại vết thì set thế nào?')">🟢 Support 1 nhựa PLA</button>
+    <button class="qa" onclick="aiQuick('Support thân PLA + interface PETG (2 nhựa khác loại) thì set thế nào, khác gì cùng loại?')">🔵 Support PLA + PETG</button>
     <button class="qa" onclick="aiQuick('Lắp 2 part đầu âm dương khít quá hoặc lỏng thì chỉnh khe hở ở đâu?')">🔩 Lắp khít/lỏng (âm dương)</button>
     <button class="qa" onclick="aiQuick('Mặt trên bị sọc / thiếu lớp thì sửa thế nào?')">✨ Mặt trên đẹp</button>
     <button class="qa" onclick="aiQuick('Nhựa đang lắp để nhiệt nozzle và bàn bao nhiêu?')">🌡️ Nhiệt nhựa đang lắp</button>
