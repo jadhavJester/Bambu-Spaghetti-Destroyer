@@ -1,212 +1,138 @@
-# LP-BambuLab — Bộ công cụ Bambu Lab A1
+# 🍝 Bambu-Spaghetti-Destroyer
 
-Tài liệu + công cụ tự dùng cho máy in **Bambu Lab A1 (+ AMS Lite)**: một hub HTML tra cứu
-thông số offline, bộ phân tích file `.3mf`, và script nói chuyện với máy in qua LAN.
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![YOLOv8](https://img.shields.io/badge/YOLO-v8%20%2F%20v11-green.svg)](https://github.com/ultralytics/ultralytics)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Bambu Lab](https://img.shields.io/badge/Bambu%20Lab-A1%20%7C%20P1%20%7C%20X1-red.svg)](https://bambulab.com)
 
-Toàn bộ số liệu trong hub được **đối chiếu với bản Bambu Studio cài trên máy**, không lấy từ
-trí nhớ hay từ nhánh `master` trên GitHub (xem [NOTICE](NOTICE) — mục "Vì sao giữ bản sao local").
+**Autonomous AI-Powered 3D Print Failure & Spaghetti Sentinel with Remote Cloud Command Center for Bambu Lab 3D Printers.**
 
-## Nội dung
+---
 
-| File | Là gì |
-|---|---|
-| `BambuLab-A1-Hub.html` | Hub chính. Tra thông số theo *nhựa × mục tiêu in*, xem giải thích từng option, thả file `.3mf` vào để audit, xuất preset import được vào Bambu Studio. Chạy offline, không cần server. |
-| `BambuLab-A1-Operator-Manual.html` | Sổ tay vận hành máy. |
-| `BambuLab-A1-Combo-AMS-TechTransfer.html` | Ghi chú chuyển giao AMS Lite. |
-| `BambuLab-A1-Form-Mau-ThongSo.html` | Form mẫu điền thông số. |
-| `analyze_print.py` | Phân tích file in. |
-| `bambu_status.py` | Đọc trạng thái máy qua MQTT LAN (cổng 8883). |
-| `bambu_connect.py` | Sinh `printer.local.json` từ IP / Serial / Access Code. |
-| `bambu_web.py` | Web dashboard theo dõi + bảng điều khiển qua LAN (bạn bấm, không phải AI). Kèm trang `/analyze`: upload STL/3MF → phân tích → sinh preset → slice → đẩy xuống máy. |
-| `analyzer.py` | Bộ suy luận preset từ mesh thật: seam / wall order / support / brim / lớp đầu / trần lưu lượng — mọi giá trị đều kèm dòng "vì sao". |
-| `optimize_e2e.py` | Slice THẬT baseline + 3 chế độ bằng Bambu Studio CLI để so sánh số thật. |
-| `slicer_cli.py` / `stl_to_3mf.py` | Gọi CLI slice + bọc STL trần thành `.3mf` mang config A1. |
-| `printer_config.py` | Đọc/ghi `printer.local.json` dùng chung cho các script. |
-| `camera_stream.py` | Camera **tích hợp** của A1 qua LAN cổng 6000 (TLS + Access Code) — không cần mua camera rời. Cache frame: n người xem = 1 kết nối tới máy. |
-| `notify.py` | Chuông về điện thoại: ntfy / Telegram / Discord. Lỗi = báo động 10 tin dồn dập + ảnh hiện trường. |
-| `telegram_bot.py` | Bot Telegram 2 chiều: nút nhanh (tình hình / ảnh / phân tích AI vision / nhiệt / mẹo / hỏi lỗi), lệnh tạm dừng–tiếp tục–dừng (xác nhận 2 bước), hỏi đáp AI. Chỉ trả lời đúng chat id của bạn. |
-| `ai_chat.py` | Hỏi đáp + vision qua OpenRouter, nhúng **bảng số đã kiểm chứng** của hub vào system prompt (không thì model free bịa số), fallback free → free → trả phí. |
-| `bench_ab.py` | A/B slice từng lever trên khay chỉ định (`--plate N`) — giá đo thật cho ngân sách thời gian. |
-| `gold_run.py` | Chạy `run_modes` trên cả thư mục file (bộ chuẩn hồi quy 83 file). |
-| `boxson-PLAMatte-Decor-*.json` | Preset mẫu (process + filament) — import được. |
-| `*.cpp` | Mã nguồn Bambu Studio, dùng làm ground truth. AGPL-3.0 — xem [NOTICE](NOTICE). |
+## 🌟 Overview
 
-## Kết nối máy in
+**Bambu-Spaghetti-Destroyer** is a zero-configuration, cloud-connected autonomous failure detection system for Bambu Lab printers (A1, A1 mini, P1P, P1S, X1C).
 
-Trên máy in bật **LAN Only Mode** + **Developer Mode**, lấy IP / Serial / Access Code, rồi:
+Unlike local-only camera bridges that stop working the moment your laptop leaves home or connects to a phone hotspot, **Bambu-Spaghetti-Destroyer** uses the **exact same proprietary Cloud P2P (TUTK/Kalay) tunnel engine that OrcaSlicer and Bambu Studio use (`BambuSource.dll`)**. This allows you to monitor and protect your prints from **anywhere in the world** — on cellular hotspot, 5G, or office Wi-Fi — with zero port forwarding, zero static IP, and zero home server requirements!
 
-```bash
-python bambu_connect.py <IP> <SERIAL> <ACCESS_CODE>   # sinh printer.local.json
-python bambu_status.py                                # đọc trạng thái
-python bambu_web.py 8787                              # dashboard: http://<IP-PC>:8787
+---
+
+## ✨ Features
+
+- 🛰️ **Works from Anywhere (Hotspot / 5G / Remote Wi-Fi)**:
+  - Automatically establishes an encrypted P2P media tunnel (`BambuSource.dll`) with your printer across the internet.
+  - Bypasses ISP Carrier-Grade NAT (CGNAT) and firewalls without requiring router port-forwarding or a VPN.
+- 🍝 **Real-Time YOLO AI Failure Detection**:
+  - Powered by fine-tuned **YOLO** weights (`spaghetti_yolo.pt`) trained on **9,000+ real 3D print failures**.
+  - Detects **Spaghetti** (detached filament / air printing), **Stringing** (whisker webs), and **Zits** (blob defects).
+- 🛑 **Autonomous Cloud Emergency Pause**:
+  - Automatically sends a monotonic MQTT control packet to `us.mqtt.bambulab.com:8883` to pause extrusion immediately when failure confidence exceeds threshold (e.g. >70%).
+  - Saves an annotated proof photo (`failure_detected_<timestamp>.jpg`) with bounding boxes.
+- 🎛️ **Live Web Command Center Dashboard (`http://localhost:8787`)**:
+  - Modern glassmorphic dark UI.
+  - Live chamber camera stream with toggleable YOLO detection bounding boxes.
+  - Live thermal gauges (Nozzle & Heatbed °C).
+  - Print progress bar, current layer / total layers, and print state (`RUNNING`, `PAUSE`, `IDLE`).
+  - Remote manual controls: **⏸️ Pause**, **▶️ Resume**, and **⏹️ Stop Print**.
+
+---
+
+## 🏗️ System Architecture
+
+```
+                    ┌──────────────────────────────────────────────┐
+                    │               BAMBU LAB CLOUD                │
+                    │         (api.bambulab.com / us.mqtt)         │
+                    └───────▲──────────────────────────────▲───────┘
+                            │                              │
+         TUTK P2P Signaling │                              │ Cloud MQTT :8883
+         & Session Token    │                              │ Telemetry & Commands
+                            │                              │
+ ┌──────────────────────────▼──────┐            ┌──────────▼────────────────────┐
+ │       BAMBU A1 AT HOME          │            │       YOUR LAPTOP / SERVER    │
+ │       (Behind Router / CGNAT)   │◀──────────▶│     (Hotspot / 5G / Remote)   │
+ └─────────────────────────────────┘  Encrypted └───────────────────────────────┘
+                                      P2P Tunnel  │
+                                                  ├── cloud_camera_stream.py (TUTK)
+                                                  ├── cloud_mqtt_control.py (MQTT)
+                                                  ├── cloud_spaghetti_ai.py (YOLO)
+                                                  └── app_dashboard.py (:8787 Web UI)
 ```
 
-`printer.local.json` **không được commit** (nó chứa access code). Khuôn mẫu ở `printer.local.example.json`.
+---
 
-## Camera bàn in (không cần mua camera)
+## 🚀 Quickstart Guide
 
-A1 có camera 1080p tích hợp — hub đọc trực tiếp qua **LAN cổng 6000** (TLS tự ký,
-user `bblp` + Access Code, giao thức OpenBambuAPI) rồi phục vụ lại:
+### 1. Requirements
+- Python 3.10 or newer.
+- Windows with **Bambu Studio** or **OrcaSlicer** installed (provides `BambuSource.dll`).
+- Dependencies:
+  ```bash
+  pip install -r requirements.txt
+  ```
 
-- Dashboard: card **📹 Camera bàn in** (bấm mở mới kết nối, đóng là tự ngắt).
-- `GET /api/camera.jpg` — 1 frame mới nhất; `GET /api/camera` — MJPEG stream.
-- UI dùng **double-buffer poll 1.2s** (tải trọn frame mới mới tráo ảnh) — không xé
-  hình trên mạng chậm. Nguồn chỉ phát ~1 frame/2s (giới hạn phần cứng A1).
-- Nút **🔍 AI soi bản in**: chụp **loạt 3 frame cách 4s** → AI vision kết luận
-  ỔN / NGHI NGỜ / HỎNG. Chụp loạt để tránh báo nhầm "lệch trục" khi bàn
-  bed-slinger đang chạy (đã dính thật).
+### 2. Connect Your Bambu Cloud Account (One-Time Setup)
+Run the authentication script to fetch your cloud session and link your printer:
+```powershell
+python cloud_bambu_auth.py
+```
+1. Enter your Bambu Cloud email & password.
+2. Enter the 6-digit verification code sent to your email.
+3. Your printer's Serial Number and access token will be saved securely to `cloud_credentials.json` (gitignored).
 
-## Chuông thông báo về điện thoại
+### 3. Launch the Live Web Command Center
+Double-click:
+👉 **`start-ai-dashboard.bat`**  
+*(or run `python app_dashboard.py` in your terminal)*
 
-Chép `.env.example` → `.env` rồi điền kênh muốn dùng (sửa `.env` **không cần
-restart** hub). Test bằng nút **📱 Gửi thử chuông điện thoại** trên dashboard.
+Open your browser to:
+👉 **`http://localhost:8787`**
 
-**Telegram (khuyên dùng, ~3 phút):**
-1. Nhắn **@BotFather** → `/newbot` → đặt tên → nhận token dạng `123456:ABC-xyz`.
-2. Mở bot vừa tạo → bấm **Start** (bắt buộc — không thì bot không nhắn được cho bạn).
-3. Lấy chat id: hỏi **@userinfobot**, hoặc để hub tự dò qua `getUpdates` sau khi bạn nhắn "hi".
-4. Điền `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` vào `.env`.
+---
 
-**ntfy (nhẹ nhất cho iPhone):** cài app ntfy → Subscribe 1 topic tự đặt khó đoán →
-điền `NTFY_TOPIC`. **Discord:** Server Settings → Integrations → Webhooks → New →
-copy URL vào `DISCORD_WEBHOOK`.
+## 📁 Repository Structure
 
-Hub tự báo (kèm link `HUB_URL` để mở camera ngay):
-- ⏳ mốc **30 / 50 / 75%** (kèm lớp, thời gian còn lại, gam nhựa) — mốc đã qua khi
-  restart được đánh dấu im lặng, không bắn lặp;
-- ✅ **100% in xong**: lời nhắn AI soạn + **ảnh thành phẩm** từ camera;
-- 🚨 **mã lỗi máy / in thất bại**: **báo động 10 tin dồn dập** (cách 3s) + ảnh hiện trường;
-- ⚠️ tạm dừng giữa chừng (thường hết nhựa): 3 tin;
-- 🔍 AI **tự soi camera ở 65/75/80/90%** (vùng lỗi vật cao hay lộ): luôn gửi ảnh +
-  kết luận; xấu thì thêm tin khẩn.
+| File | Description |
+| :--- | :--- |
+| **`app_dashboard.py`** | Real-time Web UI dashboard with live camera, telemetry, and controls. |
+| **`cloud_camera_stream.py`** | Direct `BambuSource.dll` TUTK P2P streamer for cloud camera frames. |
+| **`cloud_mqtt_control.py`** | Remote Bambu Cloud MQTT controller for telemetry and Emergency Pause. |
+| **`cloud_spaghetti_ai.py`** | Standalone AI failure detection background worker. |
+| **`cloud_bambu_auth.py`** | Cloud API authentication and device discovery helper. |
+| **`spaghetti_yolo.pt`** | Fine-tuned YOLO weights for 3D printing failures. |
+| **`train_custom_spaghetti.py`**| Pipeline to fine-tune YOLO models on custom datasets. |
+| **`start-ai-dashboard.bat`** | One-click launcher for the Web Command Center. |
+| **`start-spaghetti-monitor.bat`** | One-click launcher for the CLI AI monitor. |
+| **`Chunnu/`** | Optional local-only LAN bridge (`bambu-go2rtc` for port 6000). |
 
-Mạng VN hay bóp `api.telegram.org` chập chờn — `notify.py` đã retry ×3. Nhật ký
-gửi tin nằm ở `notify.log`.
+---
 
-## Bot Telegram 2 chiều
+## 🛠️ Training Your Own Custom Model
 
-Gõ `/start` trong bot → bàn phím nút thường trực: **📊 Tình hình in · 📷 Ảnh bàn
-in · 🔍 Phân tích bản in qua AI Vision · 🌡️ Nhiệt & khay · 💡 Mẹo in · 🧯 Hỏi lỗi ·
-⏸ Tạm dừng · ▶️ Tiếp tục · ⏹ DỪNG HẲN** (dừng hẳn phải gõ `DUNG XAC NHAN` trong
-60s — chống bấm nhầm). Gõ câu hỏi bất kỳ = AI trả lời, biết trạng thái máy thật;
-câu hỏi nhắc tới ảnh/nhìn/sản phẩm sẽ tự kèm ảnh camera cho AI vision. Bot **chỉ
-trả lời `TELEGRAM_CHAT_ID`** — người lạ nhắn là im lặng tuyệt đối.
+If you want to train or fine-tune YOLO on your own custom filament colors or camera angles:
+1. Place your dataset in `dataset/` (with `data.yaml`, `train/`, and `val/` directories).
+2. Run:
+   ```bash
+   python train_custom_spaghetti.py
+   ```
+3. Best weights will be saved in `runs/detect/bambu_spaghetti_detector/weights/best.pt`.
 
-## AI (OpenRouter)
+---
 
-Lấy key tại openrouter.ai → điền `OPENROUTER_API_KEY`. Mặc định model **free**
-($0); chuỗi fallback tự động khi free hết lượt: free chính → free dự phòng →
-`gpt-5-nano` trả phí (~$0.0001/câu). Vision mặc định `gemini-2.5-flash-lite`
-($0.10/1M — thắng đấu loại trên frame thật: duy nhất mô tả đúng vật thể đang in).
-System prompt nhúng bảng nhiệt/tốc/bàn **đã audit 2 tầng profile official** — không
-nhúng thì model free trả lời "PLA Matte 190°C" (sai; số đúng là 230°C chống kẹt).
+## 🔒 Security & Privacy
 
-## Bảo mật
+- **No Secrets in Repo**: Account credentials and tokens are saved locally to `cloud_credentials.json` and `.env` which are strictly excluded via `.gitignore`.
+- **Encrypted Communication**: All control signals use TLS 1.3 MQTT (:8883), and video streams use encrypted P2P tunnels.
 
-**Không bao giờ đặt cấu hình máy in vào `.mcp.json`.** Claude Code tự động nạp
-project-scoped MCP server từ `.mcp.json` ở thư mục gốc. Nếu cấu hình nằm ở đó,
-AI sẽ được trao toàn quyền điều khiển máy in — `start_print_job`, `cancel_print`,
-`set_temperature`, `delete_printer_file`, `upload_gcode`, `set_ams_drying`…
+---
 
-Nguyên tắc của dự án: **mọi lệnh điều khiển do người dùng bấm trên web dashboard;
-AI chỉ đọc và phân tích.** Hai lớp bảo vệ đang bật:
+## 🤝 Acknowledgments
 
-1. Cấu hình nằm ở `printer.local.json` (không phải `.mcp.json`), và `.mcp.json` bị gitignore.
-2. `.claude/settings.json` đặt `"disabledMcpjsonServers": ["bambu-printer"]`.
+- **[Ultralytics YOLO](https://github.com/ultralytics/ultralytics)** for the object detection architecture.
+- **[OpenBambuAPI](https://github.com/Doridian/OpenBambuAPI)** & **[open-bamboo-networking](https://github.com/ClusterM/open-bamboo-networking)** for reverse engineering research on Bambu networking protocols.
+- **[OrcaSlicer](https://github.com/SoftFever/OrcaSlicer)** & **[BambuStudio](https://github.com/bambulab/BambuStudio)** for the native `BambuSource.dll` media driver.
 
-Mọi secret (Access Code, `TELEGRAM_BOT_TOKEN`, `OPENROUTER_API_KEY`…) chỉ nằm trong
-`.env` / `printer.local.json` — cả hai đều **gitignore**, không bao giờ lên repo.
-Bot Telegram lộ token thì vào @BotFather `/revoke` là cấp lại được ngay.
+---
 
-## Ba cái bẫy đã tốn thời gian để tìm ra
-
-**1. Scarf seam có hai công tắc, và filament thắng im lặng.**
-`seam_slope_type` (Process) bật scarf, nhưng `filament_scarf_seam_type` (Filament) mặc định là
-`none` và **không có ô checkbox override** — nên nó luôn đè lên Process. Kết quả: scarf tắt mà
-không báo gì, seam vẫn lộ. Lòng chảo/lỗ là *hole*, nên phải đặt `all` (Contour **and hole**),
-không phải `external`.
-
-**2. Variable layer height bị hai thứ chặn.**
-Bambu từ chối với thông báo *"Variable layer height is not supported with Organic supports"* —
-mà `support_style = Default` lại **tự chọn organic** cho tree support. Và *"Prime tower does not
-work when Adaptive Layer Height is on"*. Ngoài ra `adaptive_layer_height` nằm trong danh sách
-`ignore` của `PrintConfig.cpp` ⇒ **không set được bằng preset**, phải bật tay trên object.
-
-**2b. Bambu Studio 2.x không nhúng kết quả slice vào `Save Project`.**
-Kiểm trên 16 file `.3mf`: mọi file do client `1.10.x` ghi đều có `<plate>` + `prediction` trong
-`slice_info.config` (3/3); mọi file do `2.x` ghi chỉ có `<header>` (6/6), và không có chỗ nào khác
-trong file chứa tổng thời gian. Trên 2.x, cách **duy nhất** để có Thời gian in / Khối lượng thật là
-`File ▸ Export ▸ Export plate sliced file` → `.gcode.3mf`. Hub đọc `X-BBL-Client-Version` và báo
-đúng theo phiên bản, thay vì đổ lỗi cho thao tác của người dùng.
-
-**3. Hạ tốc độ tường ngoài không "mua" được chất lượng.**
-Thời gian in **tường** tỉ lệ với **số lớp**; thời gian **infill** tỉ lệ với **thể tích** (đã chạm
-trần lưu lượng 22 mm³/s). Nên: muốn tiết kiệm → giảm infill; muốn mặt cong mịn → Variable layer
-height. Hạ `outer_wall_speed`/`acceleration` chỉ làm thời gian tăng gấp ba.
-
-Đo thật trên `boxson.3mf` (182.8 × 151.8 × 150.0 mm, 79% thành đứng):
-
-| | Baseline 0.28 | Bản chỉnh sai | Bản chốt |
-|---|---|---|---|
-| Layer | 0.28 | 0.16 | **0.20** |
-| Outer speed · accel | 200 · 5000/6000 | 100 · 2500/3500 | **200 · 5000/6000** |
-| Infill | 15% grid | 15% gyroid | **10% adaptive cubic** |
-| Thời gian | 10h37m | **31h54m** | **10h44m** |
-| Nhựa | 568 g | 716 g | **469 g** (−17%) |
-
-## Hub kiểm được những gì
-
-Thả file `.3mf` vào tab **Phân tích**, hub đọc `Metadata/project_settings.config` (571 key) + mesh thật rồi báo:
-
-- **Conflict Filament → Process**: scarf seam bị tắt ngầm; 13 key retraction; 7 key overhang/bridge
-  (có tôn trọng `nil` và công tắc tổng `override_process_overhang_speed`, nên không báo oan).
-- **Chặn Variable layer height**: organic support, prime tower.
-- **Trần lưu lượng**: `v_max = max_volumetric_speed / (layer_height × line_width)`. Chỉ ra chỗ đặt
-  tốc độ cao vô nghĩa, và chỗ còn dư trần ở vùng khuất (tăng tốc miễn phí, không đụng bề mặt).
-- Vân bậc thang, cong vênh đế lớn, `Inner/Outer/Inner` khi < 3 wall, `precise_outer_wall` bị bỏ qua…
-
-## Trang /analyze — preset suy luận 100%, không số bịa
-
-Upload `.3mf`/`.stl` lên `http://<IP-PC>:8787/analyze`. Analyzer đo mesh thật rồi suy ra
-từng thông số, tên preset có cấu trúc `LP-BamBu-A1-{Fast|Balanced|HighQuality}-{layer}mm-{model}`:
-
-- **Seam** (bảng tra wiki Bambu): model hộp/CAD → `back` (dồn 100% mối nối về mặt sau — xoay
-  mặt khuất ra Y+); mặt cong không góc sắc → `aligned + scarf` (đúng cơ chế *scarf application
-  angle threshold*). Đo bằng `n_dirs` (số hướng mặt đứng) + `vert_dom_ratio`, không ngưỡng cảm tính.
-- **Wall order**: ≥3 thành → `inner-outer-inner` (sandwich — thành ngoài được đỡ lưng mà vẫn
-  chính xác kích thước). Balanced/Quality mặc định 3 thành; Fast 2 thành → `inner/outer`.
-- **Lớp đầu**: giữ 50 mm/s chuẩn A1 (hạ tốc chỉ làm lâu, không bám hơn); đáy nhỏ / tỉ lệ lật
-  cao → tăng **độ dày** lớp đầu 0.2→0.24mm thay vì giảm tốc.
-- **Support interface tự áp** (mẹo "gỡ ra đẹp như mặt kính"): thân PLA + file có PETG (hoặc
-  ngược lại) → interface = nhựa đối ứng, Top/Bottom Z = 0, spacing = 0, Rectilinear Interlaced,
-  tắt Independent support layer height — PLA↔PETG không dính nhau nên ép khít vẫn bóc rời.
-  Không có nhựa đối ứng → fallback cùng vật liệu đúng slot, khe an toàn 0.2mm. Các key được
-  cài sẵn cả khi support tắt (bật tay trong Studio là ăn ngay; ô chỉ hiện khi bật Advanced).
-- **Brim** theo tỉ lệ lật (cao ÷ cạnh đáy) + vật liệu (ABS/ASA co ngót → brim dù đáy rộng);
-  **skirt = 0** vì A1 tự mồi nhựa bằng purge line. Chi phí đã đo thật (slice Bambu CLI): brim 5mm
-  = +1.9% thời gian/nhựa, 8mm = +3.4% — rẻ hơn nhiều so với một lần in hỏng lớp đầu.
-- **Lỗ/khe đục trên shell** (`ceiling_bridges`): trần có nhịp ≤ 10mm là **bridge** — A1 bắc cầu
-  được, **trừ khỏi diện tích cần support** trước khi quyết bật/tắt (nguồn: Hydra Research design
-  rules). Đây là lý do model có nhiều khe hẹp không cần support dù overhang% cao.
-- **Thành mỏng** (`thin_walls`, ray-cast mẫu): cảnh báo khi bề dày < 1.2mm (2 perimeter); < 0.8mm
-  (2 đường nozzle) là không in đặc được; chịu lực nên ≥ 1.5mm (nguồn: Wikifactory / LayerX / 3D Demand).
-- **Support normal vs tree** (đã calibrate bằng slice thật): `flat_ratio ≥ 0.5` → `normal(auto)`
-  (giàn giáo đều — số liệu: model phẳng flat 0.76–0.85 in normal nhanh hơn tree ~18% thời gian,
-  ~10% nhựa); model cong/hữu cơ → `tree(auto)`, và cao > 150mm → `tree_strong` (nhánh to khỏi lắc).
-- **Slice + đẩy xuống máy** có dropdown chọn chế độ (Nhanh / Cân bằng / Đẹp / giữ config gốc).
-- Tài liệu mẹo PETG interface lưu cố định trong card "📚" cuối trang `/analyze`.
-
-## Đổi kết nối máy in ngay trên web (không cần sửa code)
-
-Nút **⚙ Kết nối** trên dashboard → nhập IP / Serial / Access Code (như Bambu Studio) → lưu vào
-`.env` + `printer.local.json` (đều gitignore) rồi tự kết nối lại MQTT trong ~5 giây. Access code
-đổi mỗi lần máy reset WLAN — chỉ cần gõ 8 ký tự mới. Endpoint có **chống CSRF** (kiểm Origin),
-không trả ký tự thật của code/serial ra API, đổi IP bắt buộc nhập lại code (chống trỏ nhầm).
-
-## Import preset
-
-`File ▸ Import ▸ Import Configs…` → Ctrl+chọn **cả hai** file `boxson-PLAMatte-Decor-*.json`
-→ báo "2 configs imported" → rồi **chọn preset ở dropdown** (import không tự áp dụng).
-
-Schema user-preset bắt buộc có `from: "User"`, `inherits`, `name`, **`version`**. Thiếu `version`
-là ra "0 configs imported". Không được có `type` / `instantiation` / `compatible_printers`.
+## 📄 License
+MIT License. Feel free to use and modify for personal or commercial 3D printing operations!

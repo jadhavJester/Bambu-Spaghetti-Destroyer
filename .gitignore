@@ -4,6 +4,10 @@ printer.local.json
 
 # Secret dạng .env (cùng mức bảo vệ: plaintext, chỉ tránh commit nhầm).
 .env
+Chunnu/.env
+cloud_credentials.json
+*.jpg
+*.jpeg
 
 # Dữ liệu cục bộ theo người dùng — KHÔNG commit (comment phải ở dòng riêng)
 # gam nhựa từng cuộn (theo tag_uid RFID)
