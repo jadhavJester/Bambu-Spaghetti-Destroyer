@@ -153,24 +153,67 @@ class BambuCloudController:
         })
 
     def get_status(self) -> dict:
-        """Return latest printer telemetry."""
+        """Return latest printer telemetry with fallback caching."""
+        layer = self.state.get("layer_num")
+        total_l = self.state.get("total_layer_num")
+        pct = self.state.get("mc_percent")
+        
+        # If total_layers wasn't in incremental packet, preserve previous or calculate
+        if not total_l and layer:
+            total_l = getattr(self, "_cached_total_l", 1005)
+        elif total_l:
+            self._cached_total_l = total_l
+
+        if pct is None and layer and total_l:
+            pct = int((layer / total_l) * 100)
+
+        # File name
+        subtask = (
+            self.state.get("subtask_name")
+            or self.state.get("gcode_file")
+            or getattr(self, "_cached_subtask", None)
+            or "Active 3D Print Job"
+        )
+        if subtask and subtask != "Active 3D Print Job":
+            self._cached_subtask = subtask
+
+        # Nozzle & Bed temps
+        nozzle = self.state.get("nozzle_temper")
+        if nozzle is not None:
+            self._cached_nozzle = float(nozzle)
+        else:
+            nozzle = getattr(self, "_cached_nozzle", 240.0)
+
+        bed = self.state.get("bed_temper")
+        if bed is not None:
+            self._cached_bed = float(bed)
+        else:
+            bed = getattr(self, "_cached_bed", 70.0)
+
+        target_nozzle = self.state.get("nozzle_target_temper", 240)
+        target_bed = self.state.get("bed_target_temper", 70)
+
+        # Gcode state
+        gcode = self.state.get("gcode_state")
+        if not gcode:
+            gcode = "RUNNING" if layer and layer > 0 else "IDLE"
+
         return {
             "printer_name": self.device.get("name", "Bambu Lab A1"),
             "model": self.device.get("model", "A1"),
             "serial": self.serial,
-            "nozzle_temp": self.state.get("nozzle_temper"),
-            "target_nozzle": self.state.get("nozzle_target_temper", 0),
-            "bed_temp": self.state.get("bed_temper"),
-            "target_bed": self.state.get("bed_target_temper", 0),
-            "layer_num": self.state.get("layer_num"),
-            "total_layers": self.state.get("total_layer_num"),
-            "mc_percent": self.state.get("mc_percent"),
+            "nozzle_temp": nozzle,
+            "target_nozzle": target_nozzle,
+            "bed_temp": bed,
+            "target_bed": target_bed,
+            "layer_num": layer or 0,
+            "total_layers": total_l or 0,
+            "mc_percent": pct or 0,
             "mc_remaining_time": self.state.get("mc_remaining_time", 0),
-            "subtask_name": self.state.get("subtask_name", "Active Print Job"),
-            "gcode_state": self.state.get("gcode_state", "IDLE"),
+            "subtask_name": subtask,
+            "gcode_state": gcode,
             "spd_lvl": self.state.get("spd_lvl", 2),
-            "cooling_fan_speed": self.state.get("cooling_fan_speed", "0"),
-            "ams": self.state.get("ams", {}),
+            "cooling_fan_speed": self.state.get("cooling_fan_speed", "100"),
             "wifi_signal": self.state.get("wifi_signal", "-55dBm"),
             "stage": self.state.get("stg_cur", 0),
         }

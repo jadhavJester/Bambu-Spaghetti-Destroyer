@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
-"""Bambu Lab AI Spaghetti Dashboard - Pure Bambu Studio & OrcaSlicer Device Tab.
+"""Bambu Lab AI Spaghetti Dashboard - High Performance Real-Time Streaming Edition.
 
-Streamlined Device Command Center featuring:
-- Chamber camera feed with toggleable YOLO failure detection
-- Real-time temperatures (Nozzle/Bed actual vs target)
-- Direct spool filament monitor (AMS removed)
-- Print progress, layer counter, and remaining time
-- Speed profile modes (Silent, Standard, Sport, Ludicrous)
-- Pause, Resume, Stop controls with verified monotonic MQTT
-- Telegram bot alert integration with instant photo dispatch
+Key Features:
+- Fluid Native MJPEG Video Stream (/api/stream.mjpeg) - zero polling jitter, smooth 15 FPS
+- Decoupled Camera Ingestion thread + Asynchronous YOLO Sentinel
+- Monitored Direct-Feed Single Spool & Live Bambu Cloud MQTT Telemetry
+- Verified monotonic pause/resume/stop printer controls
+- Telegram bot photo alert dispatch
 """
 from __future__ import annotations
 
@@ -16,12 +14,13 @@ import asyncio
 import io
 import os
 import sys
+import threading
 import time
 import cv2
 import numpy as np
 import requests
 from starlette.applications import Starlette
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 from ultralytics import YOLO
 
@@ -38,19 +37,21 @@ except ImportError:
     send_telegram_alert = lambda *args, **kwargs: False
 
 
+# Global state
 CONTROLLER: BambuCloudController | None = None
 YOLO_MODEL: YOLO | None = None
 
 LATEST_FRAME_RAW: np.ndarray | None = None
 LATEST_FRAME_AI: np.ndarray | None = None
+SHOW_AI_OVERLAY: bool = True
+FRAME_LOCK = threading.Lock()
+
 LATEST_DETECTIONS: list = []
 LATEST_FAIL_CONF = 0.0
 AI_LOGS = []
-LAST_CHECK_TS = 0.0
 
-# Only heavy spaghetti and bed separation are catastrophic failures that warrant pausing
 HAZARDOUS_DEFECTS = ("spaghetti", "bed", "detach", "dislodge", "air_print")
-CRITICAL_PAUSE_CONFIDENCE = 0.82  # 82% threshold (80-85% sweet spot)
+CRITICAL_PAUSE_CONFIDENCE = 0.82  # 82% threshold
 AUTO_PAUSE = True
 
 
@@ -65,110 +66,143 @@ def get_controller():
 def get_yolo():
     global YOLO_MODEL
     if YOLO_MODEL is None:
-        print("[*] Loading 3D Print Failure Detection model (spaghetti_yolo.pt)...", flush=True)
+        print("[*] Loading YOLO failure detection weights (spaghetti_yolo.pt)...", flush=True)
         YOLO_MODEL = YOLO("spaghetti_yolo.pt")
     return YOLO_MODEL
 
 
-def fetch_camera_frame() -> np.ndarray | None:
-    """Fetch camera frame via Cloud TUTK or local go2rtc."""
-    if get_cloud_streamer is not None:
-        try:
-            streamer = get_cloud_streamer()
-            frame = streamer.get_frame_cv2()
-            if frame is not None:
-                return frame
-        except Exception:
-            pass
+# --- Dedicated Thread: Fast Camera Ingestion (15 FPS) ---
 
-    try:
-        resp = requests.get("http://localhost:1984/api/frame.jpeg?src=bambu_camera", timeout=1)
-        if resp.status_code == 200 and len(resp.content) > 1000:
-            arr = np.asarray(bytearray(resp.content), dtype=np.uint8)
-            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-            if img is not None:
-                return img
-    except Exception:
-        pass
-
-    return None
-
-
-async def ai_monitor_loop():
-    """Background loop that continuously samples frames and runs YOLO."""
-    global LATEST_FRAME_RAW, LATEST_FRAME_AI, LATEST_DETECTIONS, LATEST_FAIL_CONF, LAST_CHECK_TS
-    ctrl = get_controller()
-    model = get_yolo()
+def camera_ingestion_worker():
+    """Continuously pulls camera frames from Cloud TUTK or go2rtc."""
+    global LATEST_FRAME_RAW
+    print("[*] Camera ingestion worker started.", flush=True)
+    streamer = None
 
     while True:
+        frame = None
+        # 1. Cloud TUTK P2P streamer
+        if get_cloud_streamer is not None:
+            try:
+                if streamer is None:
+                    streamer = get_cloud_streamer()
+                frame = streamer.get_frame_cv2()
+            except Exception:
+                streamer = None
+
+        # 2. Local fallback if on home LAN
+        if frame is None:
+            try:
+                resp = requests.get("http://localhost:1984/api/frame.jpeg?src=bambu_camera", timeout=0.5)
+                if resp.status_code == 200 and len(resp.content) > 1000:
+                    arr = np.asarray(bytearray(resp.content), dtype=np.uint8)
+                    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            except Exception:
+                pass
+
+        if frame is not None:
+            with FRAME_LOCK:
+                LATEST_FRAME_RAW = frame
+            time.sleep(0.06)  # ~15 FPS
+        else:
+            time.sleep(0.3)
+
+
+# --- Dedicated Thread: Asynchronous YOLO AI Sentinel ---
+
+def ai_sentinel_worker():
+    """Samples frames and evaluates failure risk without lagging video."""
+    global LATEST_FRAME_AI, LATEST_DETECTIONS, LATEST_FAIL_CONF
+    model = get_yolo()
+    ctrl = get_controller()
+    print("[*] AI Sentinel worker online.", flush=True)
+
+    while True:
+        time.sleep(1.2)
+        frame_copy = None
+        with FRAME_LOCK:
+            if LATEST_FRAME_RAW is not None:
+                frame_copy = LATEST_FRAME_RAW.copy()
+
+        if frame_copy is None:
+            continue
+
         try:
-            frame = fetch_camera_frame()
-            if frame is not None:
-                LATEST_FRAME_RAW = frame.copy()
-                
-                results = model.predict(frame, conf=0.35, verbose=False)
-                annotated = results[0].plot()
+            results = model.predict(frame_copy, conf=0.35, verbose=False)
+            annotated = results[0].plot()
+
+            detections = []
+            max_conf = 0.0
+            critical_failure = False
+            critical_defect = ""
+            critical_conf = 0.0
+
+            for box in results[0].boxes:
+                cls_id = int(box.cls[0])
+                cls_name = results[0].names.get(cls_id, str(cls_id)).lower()
+                conf = float(box.conf[0])
+                detections.append({"name": cls_name, "conf": round(conf * 100, 1)})
+
+                if conf > max_conf:
+                    max_conf = conf
+
+                # ONLY pause if defect is heavy spaghetti or bed separation >= 82%
+                is_hazardous = any(k in cls_name for k in HAZARDOUS_DEFECTS)
+                if is_hazardous and conf >= CRITICAL_PAUSE_CONFIDENCE:
+                    critical_failure = True
+                    critical_defect = cls_name
+                    critical_conf = conf
+
+            with FRAME_LOCK:
                 LATEST_FRAME_AI = annotated
-
-                detections = []
-                max_conf = 0.0
-                critical_failure = False
-                critical_defect = ""
-                critical_conf = 0.0
-
-                for box in results[0].boxes:
-                    cls_id = int(box.cls[0])
-                    cls_name = results[0].names.get(cls_id, str(cls_id)).lower()
-                    conf = float(box.conf[0])
-                    detections.append({"name": cls_name, "conf": round(conf * 100, 1)})
-                    
-                    if conf > max_conf:
-                        max_conf = conf
-
-                    # Check hazardous condition: ONLY spaghetti or bed separation >= 82%
-                    is_hazardous = any(k in cls_name for k in HAZARDOUS_DEFECTS)
-                    if is_hazardous and conf >= CRITICAL_PAUSE_CONFIDENCE:
-                        critical_failure = True
-                        critical_defect = cls_name
-                        critical_conf = conf
-
                 LATEST_DETECTIONS = detections
                 LATEST_FAIL_CONF = max_conf
-                LAST_CHECK_TS = time.time()
 
-                if critical_failure and AUTO_PAUSE:
-                    ts_str = time.strftime("%H:%M:%S")
-                    defect_title = critical_defect.replace("_", " ").title()
-                    msg = f"CRITICAL {defect_title.upper()} ({critical_conf:.1%}) -> Emergency Pause Triggered!"
-                    AI_LOGS.insert(0, {"time": ts_str, "type": "danger", "msg": msg})
-                    if len(AI_LOGS) > 30:
-                        AI_LOGS.pop()
-                    ctrl.pause_print()
+            if critical_failure and AUTO_PAUSE:
+                ts_str = time.strftime("%H:%M:%S")
+                defect_title = critical_defect.replace("_", " ").title()
+                msg = f"CRITICAL {defect_title.upper()} ({critical_conf:.1%}) -> Emergency Pause Triggered!"
+                AI_LOGS.insert(0, {"time": ts_str, "type": "danger", "msg": msg})
+                if len(AI_LOGS) > 30:
+                    AI_LOGS.pop()
+                ctrl.pause_print()
 
-                    try:
-                        stat = ctrl.get_status()
-                        ok = send_telegram_alert(
-                            photo=annotated,
-                            error_type=f"Critical {defect_title} Failure",
-                            confidence=critical_conf,
-                            layer_num=stat.get("layer_num") or 0,
-                            total_layers=stat.get("total_layers") or 0,
-                            nozzle_temp=stat.get("nozzle_temp") or 0.0,
-                            bed_temp=stat.get("bed_temp") or 0.0,
-                            action_taken="Emergency Pause Executed (Print Halted)",
-                        )
-                        if ok:
-                            AI_LOGS.insert(0, {"time": ts_str, "type": "info", "msg": "Telegram alert & proof photo delivered!"})
-                    except Exception as tg_err:
-                        print(f"[Telegram Alert Error]: {tg_err}", flush=True)
+                try:
+                    stat = ctrl.get_status()
+                    ok = send_telegram_alert(
+                        photo=annotated,
+                        error_type=f"Critical {defect_title} Failure",
+                        confidence=critical_conf,
+                        layer_num=stat.get("layer_num") or 0,
+                        total_layers=stat.get("total_layers") or 0,
+                        nozzle_temp=stat.get("nozzle_temp") or 0.0,
+                        bed_temp=stat.get("bed_temp") or 0.0,
+                        action_taken="Emergency Pause Executed (Print Halted)",
+                    )
+                    if ok:
+                        AI_LOGS.insert(0, {"time": ts_str, "type": "info", "msg": "Telegram alert & proof photo delivered!"})
+                except Exception as tg_err:
+                    print(f"[Telegram Alert Error]: {tg_err}", flush=True)
 
-        except Exception:
+        except Exception as e:
+            # print(f"Inference error: {e}")
             pass
 
-        await asyncio.sleep(3)
+
+# --- Background MQTT Telemetry Poller ---
+
+def mqtt_heartbeat_worker():
+    """Periodically requests full telemetry dumps from Bambu Cloud."""
+    ctrl = get_controller()
+    while True:
+        try:
+            ctrl.request_full_status()
+        except Exception:
+            pass
+        time.sleep(8)
 
 
-# --- HTML Frontend ---
+# --- Starlette Web Routes ---
 
 async def index(request):
     html = """<!DOCTYPE html>
@@ -176,7 +210,7 @@ async def index(request):
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bambu Studio / OrcaSlicer - Device Manager</title>
+  <title>Bambu Studio / OrcaSlicer - Live Command Center</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
@@ -424,7 +458,7 @@ async def index(request):
     <div class="slicer-tabs">
       <div class="slicer-logo">
         <span>BambuStudio</span>
-        <span class="slicer-logo-badge">DEVICE</span>
+        <span class="slicer-logo-badge">LIVE</span>
       </div>
       <div class="tab-item">Device Control</div>
     </div>
@@ -444,19 +478,20 @@ async def index(request):
 
   <!-- Main Work Area (Device View) -->
   <main>
-    <!-- Left: Camera & OrcaSlicer Control Bar -->
+    <!-- Left: Chamber MJPEG Video Stream & Controls -->
     <div style="display: flex; flex-direction: column; gap: 1rem;">
       <div class="studio-card">
         <div class="studio-card-header">
-          <span>Chamber Live Stream</span>
+          <span>Chamber Live Stream (MJPEG 15 FPS)</span>
           <label style="cursor: pointer; display: flex; align-items: center; gap: 0.35rem; font-size: 0.8rem;">
-            <input type="checkbox" id="ai-toggle" checked onchange="toggleView()">
+            <input type="checkbox" id="ai-toggle" checked onchange="toggleAiView(this.checked)">
             <span>YOLO AI Overlays</span>
           </label>
         </div>
 
         <div class="camera-viewport">
-          <img id="live-camera" src="/api/stream.jpg" alt="Chamber Camera Feed">
+          <!-- Fluid Native MJPEG Continuous Video Stream -->
+          <img id="live-camera" src="/api/stream.mjpeg" alt="Chamber Camera Feed">
           <div class="cam-overlay-top">
             <div class="cam-badge">
               <span style="color: #ef4444;">● LIVE</span>
@@ -576,11 +611,6 @@ async def index(request):
   </main>
 
   <script>
-    let showAi = true;
-    function toggleView() {
-      showAi = document.getElementById('ai-toggle').checked;
-    }
-
     function toggleFullscreen() {
       const elem = document.querySelector('.camera-viewport');
       if (!document.fullscreenElement) {
@@ -590,13 +620,15 @@ async def index(request):
       }
     }
 
-    function refreshFrame() {
-      const img = document.getElementById('live-camera');
-      const url = showAi ? '/api/stream_ai.jpg?t=' : '/api/stream_raw.jpg?t=';
-      img.src = url + Date.now();
+    async function toggleAiView(enabled) {
+      try {
+        await fetch(`/api/toggle_ai?enabled=${enabled}`, { method: 'POST' });
+      } catch (e) {
+        console.error("Toggle AI error", e);
+      }
     }
-    setInterval(refreshFrame, 1200);
 
+    // Real-time Telemetry Poller (1.5s)
     async function updateTelemetry() {
       try {
         const res = await fetch('/api/status');
@@ -635,14 +667,8 @@ async def index(request):
         const riskBadge = document.getElementById('risk-badge-text');
         const aiBadge = document.getElementById('ai-detect-badge');
 
-        const risk = Math.round((data.fail_conf || 0) * 100);
-        const riskElem = document.getElementById('risk-val');
-        const riskBadge = document.getElementById('risk-badge-text');
-        const aiBadge = document.getElementById('ai-detect-badge');
-
         riskElem.innerText = risk + '%';
         
-        // Differentiate hazardous (spaghetti / bed detach >= 82%) vs cosmetic (stringing/zits)
         const dets = (data.detections || []).map(d => d.name.toLowerCase());
         const hasHazardous = dets.some(n => n.includes('spaghetti') || n.includes('bed') || n.includes('detach'));
 
@@ -682,7 +708,7 @@ async def index(request):
         console.error("Telemetry fetch error:", e);
       }
     }
-    setInterval(updateTelemetry, 2000);
+    setInterval(updateTelemetry, 1500);
     updateTelemetry();
 
     async function sendCommand(cmd) {
@@ -721,25 +747,49 @@ async def api_status(request):
     return JSONResponse(stat)
 
 
-async def api_stream_ai(request):
-    global LATEST_FRAME_AI, LATEST_FRAME_RAW
-    img = LATEST_FRAME_AI if LATEST_FRAME_AI is not None else LATEST_FRAME_RAW
-    if img is not None:
-        _, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+async def api_mjpeg_stream(request):
+    """High-performance continuous MJPEG live video stream (15 FPS)."""
+    async def frame_generator():
+        while True:
+            frame = None
+            with FRAME_LOCK:
+                if SHOW_AI_OVERLAY and LATEST_FRAME_AI is not None:
+                    frame = LATEST_FRAME_AI
+                elif LATEST_FRAME_RAW is not None:
+                    frame = LATEST_FRAME_RAW
+
+            if frame is not None:
+                _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                yield (
+                    b'--frame\r\n'
+                    b'Content-Type: image/jpeg\r\n\r\n' + buf.tobytes() + b'\r\n'
+                )
+            await asyncio.sleep(0.065)  # ~15 FPS
+
+    return StreamingResponse(frame_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
+
+
+async def api_stream_single(request):
+    """Fallback single JPEG frame."""
+    frame = None
+    with FRAME_LOCK:
+        frame = LATEST_FRAME_AI if (SHOW_AI_OVERLAY and LATEST_FRAME_AI is not None) else LATEST_FRAME_RAW
+
+    if frame is not None:
+        _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
         return Response(buf.tobytes(), media_type="image/jpeg")
 
     blank = np.zeros((480, 640, 3), dtype=np.uint8)
-    cv2.putText(blank, "Connecting to A1 Chamber Camera...", (100, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    cv2.putText(blank, "Waiting for Camera Stream...", (120, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
     _, buf = cv2.imencode('.jpg', blank)
     return Response(buf.tobytes(), media_type="image/jpeg")
 
 
-async def api_stream_raw(request):
-    global LATEST_FRAME_RAW
-    if LATEST_FRAME_RAW is not None:
-        _, buf = cv2.imencode('.jpg', LATEST_FRAME_RAW, [cv2.IMWRITE_JPEG_QUALITY, 80])
-        return Response(buf.tobytes(), media_type="image/jpeg")
-    return await api_stream_ai(request)
+async def api_toggle_ai(request):
+    global SHOW_AI_OVERLAY
+    enabled_str = request.query_params.get("enabled", "true")
+    SHOW_AI_OVERLAY = enabled_str.lower() in ("1", "true", "yes")
+    return JSONResponse({"status": "ok", "show_ai": SHOW_AI_OVERLAY})
 
 
 async def api_control(request):
@@ -762,18 +812,34 @@ async def api_control(request):
 routes = [
     Route("/", endpoint=index),
     Route("/api/status", endpoint=api_status),
-    Route("/api/stream.jpg", endpoint=api_stream_ai),
-    Route("/api/stream_ai.jpg", endpoint=api_stream_ai),
-    Route("/api/stream_raw.jpg", endpoint=api_stream_raw),
+    Route("/api/stream.mjpeg", endpoint=api_mjpeg_stream),
+    Route("/api/stream.jpg", endpoint=api_stream_single),
+    Route("/api/toggle_ai", endpoint=api_toggle_ai, methods=["POST"]),
     Route("/api/control/{command}", endpoint=api_control, methods=["POST"]),
 ]
 
-app = Starlette(routes=routes, on_startup=[lambda: asyncio.create_task(ai_monitor_loop())])
+app = Starlette(routes=routes)
+
+
+def start_all_background_workers():
+    """Start threads on launch."""
+    get_controller()
+    
+    t_cam = threading.Thread(target=camera_ingestion_worker, daemon=True)
+    t_cam.start()
+
+    t_ai = threading.Thread(target=ai_sentinel_worker, daemon=True)
+    t_ai.start()
+
+    t_hb = threading.Thread(target=mqtt_heartbeat_worker, daemon=True)
+    t_hb.start()
+
 
 if __name__ == "__main__":
     import uvicorn
     print("\n" + "=" * 60)
-    print("🚀 Bambu Studio / OrcaSlicer Device Manager Starting!")
+    print("🚀 Bambu Studio / OrcaSlicer Real-Time Dashboard Starting!")
     print("👉 Open in browser: http://localhost:8787")
     print("=" * 60 + "\n")
+    start_all_background_workers()
     uvicorn.run(app, host="0.0.0.0", port=8787, log_level="warning")
