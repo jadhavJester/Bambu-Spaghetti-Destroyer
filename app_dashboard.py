@@ -48,7 +48,9 @@ LATEST_FAIL_CONF = 0.0
 AI_LOGS = []
 LAST_CHECK_TS = 0.0
 
-CONFIDENCE_THRESHOLD = 0.70
+# Only heavy spaghetti and bed separation are catastrophic failures that warrant pausing
+HAZARDOUS_DEFECTS = ("spaghetti", "bed", "detach", "dislodge", "air_print")
+CRITICAL_PAUSE_CONFIDENCE = 0.82  # 82% threshold (80-85% sweet spot)
 AUTO_PAUSE = True
 
 
@@ -110,26 +112,34 @@ async def ai_monitor_loop():
 
                 detections = []
                 max_conf = 0.0
-                is_failure = False
+                critical_failure = False
+                critical_defect = ""
+                critical_conf = 0.0
 
                 for box in results[0].boxes:
                     cls_id = int(box.cls[0])
-                    cls_name = results[0].names.get(cls_id, str(cls_id))
+                    cls_name = results[0].names.get(cls_id, str(cls_id)).lower()
                     conf = float(box.conf[0])
                     detections.append({"name": cls_name, "conf": round(conf * 100, 1)})
+                    
                     if conf > max_conf:
                         max_conf = conf
-                    if conf >= CONFIDENCE_THRESHOLD:
-                        is_failure = True
+
+                    # Check hazardous condition: ONLY spaghetti or bed separation >= 82%
+                    is_hazardous = any(k in cls_name for k in HAZARDOUS_DEFECTS)
+                    if is_hazardous and conf >= CRITICAL_PAUSE_CONFIDENCE:
+                        critical_failure = True
+                        critical_defect = cls_name
+                        critical_conf = conf
 
                 LATEST_DETECTIONS = detections
                 LATEST_FAIL_CONF = max_conf
                 LAST_CHECK_TS = time.time()
 
-                if is_failure and AUTO_PAUSE:
+                if critical_failure and AUTO_PAUSE:
                     ts_str = time.strftime("%H:%M:%S")
-                    defect_str = ", ".join([d["name"] for d in detections]) or "Spaghetti Failure"
-                    msg = f"{defect_str} detected ({max_conf:.1%}) -> Emergency Pause Triggered!"
+                    defect_title = critical_defect.replace("_", " ").title()
+                    msg = f"CRITICAL {defect_title.upper()} ({critical_conf:.1%}) -> Emergency Pause Triggered!"
                     AI_LOGS.insert(0, {"time": ts_str, "type": "danger", "msg": msg})
                     if len(AI_LOGS) > 30:
                         AI_LOGS.pop()
@@ -139,13 +149,13 @@ async def ai_monitor_loop():
                         stat = ctrl.get_status()
                         ok = send_telegram_alert(
                             photo=annotated,
-                            error_type=defect_str,
-                            confidence=max_conf,
+                            error_type=f"Critical {defect_title} Failure",
+                            confidence=critical_conf,
                             layer_num=stat.get("layer_num") or 0,
                             total_layers=stat.get("total_layers") or 0,
                             nozzle_temp=stat.get("nozzle_temp") or 0.0,
                             bed_temp=stat.get("bed_temp") or 0.0,
-                            action_taken="Print Paused Automatically via Cloud MQTT",
+                            action_taken="Emergency Pause Executed (Print Halted)",
                         )
                         if ok:
                             AI_LOGS.insert(0, {"time": ts_str, "type": "info", "msg": "Telegram alert & proof photo delivered!"})
@@ -625,18 +635,34 @@ async def index(request):
         const riskBadge = document.getElementById('risk-badge-text');
         const aiBadge = document.getElementById('ai-detect-badge');
 
+        const risk = Math.round((data.fail_conf || 0) * 100);
+        const riskElem = document.getElementById('risk-val');
+        const riskBadge = document.getElementById('risk-badge-text');
+        const aiBadge = document.getElementById('ai-detect-badge');
+
         riskElem.innerText = risk + '%';
-        if (risk > 60) {
+        
+        // Differentiate hazardous (spaghetti / bed detach >= 82%) vs cosmetic (stringing/zits)
+        const dets = (data.detections || []).map(d => d.name.toLowerCase());
+        const hasHazardous = dets.some(n => n.includes('spaghetti') || n.includes('bed') || n.includes('detach'));
+
+        if (hasHazardous && risk >= 82) {
           riskElem.style.color = '#ef4444';
-          riskBadge.innerText = 'DEFECT!';
+          riskBadge.innerText = 'CRITICAL DEFECT!';
           riskBadge.style.color = '#ef4444';
-          aiBadge.innerText = '| DEFECT DETECTED';
+          aiBadge.innerText = '| 🚨 HAZARDOUS FAILURE (PAUSED)';
           aiBadge.style.color = '#ef4444';
-        } else if (risk > 30) {
+        } else if (dets.includes('stringing') || dets.includes('zits')) {
+          riskElem.style.color = '#38bdf8';
+          riskBadge.innerText = 'Cosmetic Only';
+          riskBadge.style.color = '#38bdf8';
+          aiBadge.innerText = '| Minor Stringing/Zits (Running)';
+          aiBadge.style.color = '#38bdf8';
+        } else if (risk > 40) {
           riskElem.style.color = '#f59e0b';
-          riskBadge.innerText = 'Warning';
+          riskBadge.innerText = 'Watching';
           riskBadge.style.color = '#f59e0b';
-          aiBadge.innerText = '| WARNING';
+          aiBadge.innerText = '| Analyzing Surface';
           aiBadge.style.color = '#f59e0b';
         } else {
           riskElem.style.color = '#00ae42';

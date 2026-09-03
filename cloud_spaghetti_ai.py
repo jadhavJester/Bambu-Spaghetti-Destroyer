@@ -77,27 +77,35 @@ class SpaghettiDetector:
 
         return None
 
-    def analyze_frame(self, frame: np.ndarray) -> tuple[bool, float, np.ndarray, list]:
-        """Run YOLO inference and return (is_failure, max_conf, annotated_frame, detections)."""
-        results = self.model.predict(frame, conf=CONFIDENCE_THRESHOLD, verbose=False)
+    def analyze_frame(self, frame: np.ndarray) -> tuple[bool, float, np.ndarray, list, str]:
+        """Run YOLO inference and return (is_hazardous_failure, max_conf, annotated_frame, detections, defect_name)."""
+        results = self.model.predict(frame, conf=0.35, verbose=False)
         annotated = results[0].plot()
         
         is_failure = False
         max_conf = 0.0
         detections = []
+        critical_defect = ""
         
+        hazardous_keywords = ("spaghetti", "bed", "detach", "dislodge", "air_print")
+        critical_threshold = 0.82  # 82% confidence threshold for hazardous defects only
+
         for box in results[0].boxes:
             conf = float(box.conf[0])
             cls_id = int(box.cls[0])
-            cls_name = results[0].names.get(cls_id, str(cls_id))
+            cls_name = results[0].names.get(cls_id, str(cls_id)).lower()
             detections.append(f"{cls_name} ({conf:.0%})")
             if conf > max_conf:
                 max_conf = conf
-            # Custom 3D print failure threshold
-            if conf >= CONFIDENCE_THRESHOLD:
-                is_failure = True
                 
-        return is_failure, max_conf, annotated, detections
+            # Only pause if defect is catastrophic (heavy spaghetti or bed separation >= 82%)
+            # Minor stringing and zits are cosmetic and never trigger a pause
+            is_hazardous = any(k in cls_name for k in hazardous_keywords)
+            if is_hazardous and conf >= critical_threshold:
+                is_failure = True
+                critical_defect = cls_name
+                
+        return is_failure, max_conf, annotated, detections, critical_defect
 
     def run(self):
         print(f"[+] AI Failure Monitor ACTIVE (checking every {CHECK_INTERVAL_SECONDS}s)...", flush=True)
@@ -124,11 +132,12 @@ class SpaghettiDetector:
                     print(f"[{time.strftime('%H:%M:%S')}] Waiting for camera frame... (State: {state} | Layer: {layer}/{total_l})", flush=True)
                     continue
 
-                is_fail, conf, annotated, detections = self.analyze_frame(frame)
+                is_fail, conf, annotated, detections, defect_name = self.analyze_frame(frame)
                 ts = time.strftime('%H:%M:%S')
 
                 if is_fail and not self.paused_by_ai:
-                    print(f"\n[{ts}] 🚨 SPAGHETTI FAILURE DETECTED! (Confidence: {conf:.1%})", flush=True)
+                    defect_title = defect_name.replace("_", " ").title() or "Spaghetti"
+                    print(f"\n[{ts}] 🚨 CRITICAL {defect_title.upper()} DETECTED! (Confidence: {conf:.1%})", flush=True)
                     print(f"[{ts}] 🛑 SENDING EMERGENCY PAUSE COMMAND TO PRINTER...", flush=True)
                     
                     # 1. Emergency Pause Print via Cloud MQTT
@@ -143,7 +152,7 @@ class SpaghettiDetector:
                     # 3. Send Telegram Alert with Annotated Proof Photo
                     try:
                         from telegram_alert import send_telegram_alert
-                        defect_str = ", ".join(detections) or "Spaghetti Failure"
+                        defect_str = f"Critical {defect_title} Failure"
                         send_telegram_alert(
                             photo=annotated,
                             error_type=defect_str,
@@ -152,7 +161,7 @@ class SpaghettiDetector:
                             total_layers=total_l,
                             nozzle_temp=nozzle,
                             bed_temp=bed,
-                            action_taken="Print Paused Automatically via Cloud MQTT",
+                            action_taken="Emergency Pause Executed (Print Halted)",
                         )
                     except Exception as e:
                         print(f"[!] Telegram notification error: {e}", flush=True)
