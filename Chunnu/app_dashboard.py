@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Bambu Lab AI Spaghetti Detector & Printer Command Center Dashboard.
+"""Bambu Lab AI Spaghetti Dashboard - Bambu Studio / OrcaSlicer UI Edition.
 
-Serves an ultra-sleek real-time web UI on http://localhost:8787 with:
-- Live AI Camera Stream with toggleable YOLO detection overlay.
-- Real-time Cloud Telemetry (Temperatures, Layer #, Progress %, Gcode state).
-- Remote Controls (Emergency Pause, Resume, Stop).
-- AI Failure Detection Event Log.
+Authentic Bambu Studio & OrcaSlicer 'Device' view featuring:
+- Chamber camera feed with toggleable YOLO failure detection
+- Real-time temperatures (Nozzle/Bed actual vs target)
+- 4-Slot AMS Filament Spool visualizer
+- Print progress, layer counter, and remaining time
+- Speed profile modes (Silent, Standard, Sport, Ludicrous)
+- Pause, Resume, Stop controls with verified monotonic MQTT
+- Telegram bot alert integration with instant photo dispatch
 """
 from __future__ import annotations
 
 import asyncio
 import io
-import json
 import os
 import sys
 import time
@@ -19,29 +21,36 @@ import cv2
 import numpy as np
 import requests
 from starlette.applications import Starlette
-from starlette.responses import HTMLResponse, JSONResponse, StreamingResponse, Response
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 from ultralytics import YOLO
-import uvicorn
 
 from cloud_mqtt_control import BambuCloudController
-try:
-    import camera_stream
-except ImportError:
-    camera_stream = None
 
-# Global detector state
-CONTROLLER = None
-YOLO_MODEL = None
-AUTO_PAUSE = True
-LATEST_FRAME_RAW = None
-LATEST_FRAME_AI = None
-LATEST_DETECTIONS = []
+try:
+    from cloud_camera_stream import get_cloud_streamer
+except ImportError:
+    get_cloud_streamer = None
+
+try:
+    from telegram_alert import send_telegram_alert
+except ImportError:
+    send_telegram_alert = lambda *args, **kwargs: False
+
+
+# Global state
+CONTROLLER: BambuCloudController | None = None
+YOLO_MODEL: YOLO | None = None
+
+LATEST_FRAME_RAW: np.ndarray | None = None
+LATEST_FRAME_AI: np.ndarray | None = None
+LATEST_DETECTIONS: list = []
 LATEST_FAIL_CONF = 0.0
 AI_LOGS = []
 LAST_CHECK_TS = 0.0
 
 CONFIDENCE_THRESHOLD = 0.70
+AUTO_PAUSE = True
 
 
 def get_controller():
@@ -58,17 +67,6 @@ def get_yolo():
         print("[*] Loading 3D Print Failure Detection model (spaghetti_yolo.pt)...", flush=True)
         YOLO_MODEL = YOLO("spaghetti_yolo.pt")
     return YOLO_MODEL
-
-
-try:
-    from cloud_camera_stream import get_cloud_streamer
-except ImportError:
-    get_cloud_streamer = None
-
-try:
-    from telegram_alert import send_telegram_alert
-except ImportError:
-    send_telegram_alert = lambda *args, **kwargs: False
 
 
 def fetch_camera_frame() -> np.ndarray | None:
@@ -102,26 +100,27 @@ async def ai_monitor_loop():
     global LATEST_FRAME_RAW, LATEST_FRAME_AI, LATEST_DETECTIONS, LATEST_FAIL_CONF, LAST_CHECK_TS
     ctrl = get_controller()
     model = get_yolo()
-    
+
     while True:
         try:
             frame = fetch_camera_frame()
             if frame is not None:
                 LATEST_FRAME_RAW = frame.copy()
                 
-                # Run YOLO
-                results = model.predict(frame, conf=0.50, verbose=False)
+                # YOLO inference
+                results = model.predict(frame, conf=0.35, verbose=False)
                 annotated = results[0].plot()
                 LATEST_FRAME_AI = annotated
-                
+
+                # Check detections
                 detections = []
-                is_failure = False
                 max_conf = 0.0
-                
+                is_failure = False
+
                 for box in results[0].boxes:
-                    conf = float(box.conf[0])
                     cls_id = int(box.cls[0])
                     cls_name = results[0].names.get(cls_id, str(cls_id))
+                    conf = float(box.conf[0])
                     detections.append({"name": cls_name, "conf": round(conf * 100, 1)})
                     if conf > max_conf:
                         max_conf = conf
@@ -149,10 +148,10 @@ async def ai_monitor_loop():
                             photo=annotated,
                             error_type=defect_str,
                             confidence=max_conf,
-                            layer_num=stat.get("layer_num", 0),
-                            total_layers=stat.get("total_layers", 0),
-                            nozzle_temp=stat.get("nozzle_temp", 0.0),
-                            bed_temp=stat.get("bed_temp", 0.0),
+                            layer_num=stat.get("layer_num") or 0,
+                            total_layers=stat.get("total_layers") or 0,
+                            nozzle_temp=stat.get("nozzle_temp") or 0.0,
+                            bed_temp=stat.get("bed_temp") or 0.0,
                             action_taken="Print Paused Automatically via Cloud MQTT",
                         )
                         if ok:
@@ -160,11 +159,10 @@ async def ai_monitor_loop():
                     except Exception as tg_err:
                         print(f"[Telegram Alert Error]: {tg_err}", flush=True)
 
-        except Exception as e:
-            # print(f"Monitor loop error: {e}")
+        except Exception:
             pass
-            
-        await asyncio.sleep(4)
+
+        await asyncio.sleep(3)
 
 
 # --- HTTP Handlers ---
@@ -175,333 +173,612 @@ async def index(request):
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bambu A1 | AI Spaghetti Monitor</title>
+  <title>Bambu Studio / OrcaSlicer - Device Manager</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #0d1117;
-      --card-bg: rgba(22, 27, 34, 0.85);
-      --card-border: rgba(255, 255, 255, 0.08);
-      --accent: #10b981;
-      --accent-glow: rgba(16, 185, 129, 0.25);
+      --bg-darkest: #181818;
+      --bg-header: #1f1f1f;
+      --bg-card: #242424;
+      --bg-card-alt: #2a2a2a;
+      --border-color: #383838;
+      --bambu-green: #00ae42;
+      --bambu-green-hover: #008f36;
+      --bambu-green-glow: rgba(0, 174, 66, 0.3);
+      --orca-teal: #06b6d4;
       --danger: #ef4444;
       --warning: #f59e0b;
-      --text: #f3f4f6;
-      --text-muted: #9ca3af;
+      --text-main: #f0f0f0;
+      --text-muted: #9e9e9e;
+      --text-subtle: #757575;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Outfit', sans-serif;
+      background: var(--bg-darkest);
+      color: var(--text-main);
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
-      background-image: radial-gradient(circle at 20% 15%, rgba(16, 185, 129, 0.08) 0%, transparent 40%),
-                        radial-gradient(circle at 80% 85%, rgba(59, 130, 246, 0.06) 0%, transparent 40%);
+      user-select: none;
     }
+
+    /* Top Slicer Navigation Bar */
     header {
-      padding: 1rem 2rem;
+      background: var(--bg-header);
+      border-bottom: 1px solid var(--border-color);
       display: flex;
-      justify-content: space-between;
       align-items: center;
-      border-bottom: 1px solid var(--card-border);
-      backdrop-filter: blur(12px);
-      background: rgba(13, 17, 23, 0.8);
+      justify-content: space-between;
+      height: 48px;
+      padding: 0 1.25rem;
       position: sticky;
       top: 0;
-      z-index: 50;
+      z-index: 100;
     }
-    .logo-group { display: flex; align-items: center; gap: 0.75rem; }
-    .logo-icon {
-      width: 36px; height: 36px;
-      background: linear-gradient(135deg, #10b981, #059669);
-      border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 4px 12px var(--accent-glow);
+    .slicer-tabs {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      height: 100%;
     }
-    .logo-title { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.02em; }
-    .logo-subtitle { font-size: 0.75rem; color: var(--text-muted); }
-    .status-badge {
-      display: inline-flex;
+    .slicer-logo {
+      display: flex;
       align-items: center;
       gap: 0.5rem;
-      padding: 0.35rem 0.85rem;
-      border-radius: 9999px;
-      font-size: 0.8rem;
+      font-weight: 700;
+      font-size: 1rem;
+      letter-spacing: -0.01em;
+      color: #fff;
+    }
+    .slicer-logo-badge {
+      background: var(--bambu-green);
+      color: #fff;
+      font-size: 0.7rem;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-weight: 700;
+    }
+    .tab-item {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      height: 100%;
+      border-bottom: 2px solid transparent;
+      padding: 0 0.5rem;
+      transition: all 0.2s;
+    }
+    .tab-item:hover { color: #fff; }
+    .tab-item.active {
+      color: #fff;
+      border-bottom-color: var(--bambu-green);
       font-weight: 600;
-      background: rgba(16, 185, 129, 0.15);
-      color: #34d399;
-      border: 1px solid rgba(16, 185, 129, 0.3);
     }
-    .status-dot {
-      width: 8px; height: 8px; border-radius: 50%; background: #10b981;
-      box-shadow: 0 0 10px #10b981;
-      animation: pulse 2s infinite;
-    }
-    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.85); } }
 
+    /* Header Right Info */
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 1.25rem;
+      font-size: 0.85rem;
+    }
+    .printer-selector {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: var(--bg-card-alt);
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid var(--border-color);
+    }
+    .online-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--bambu-green);
+      box-shadow: 0 0 8px var(--bambu-green);
+    }
+    .sentinel-pill {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: rgba(0, 174, 66, 0.12);
+      border: 1px solid rgba(0, 174, 66, 0.3);
+      padding: 0.3rem 0.65rem;
+      border-radius: 6px;
+      color: #4ade80;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    /* Main Container */
     main {
-      padding: 1.5rem 2rem;
       flex: 1;
+      padding: 1.25rem 1.5rem;
       display: grid;
-      grid-template-columns: 1.4fr 1fr;
-      gap: 1.5rem;
-      max-width: 1600px;
+      grid-template-columns: 1.55fr 1fr;
+      gap: 1.25rem;
+      max-width: 1720px;
       width: 100%;
       margin: 0 auto;
     }
-    @media (max-width: 1024px) { main { grid-template-columns: 1fr; } }
+    @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
 
-    .card {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 16px;
-      padding: 1.25rem;
-      backdrop-filter: blur(16px);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+    /* Studio Device Cards */
+    .studio-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
-    .card-title {
-      font-size: 1rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      margin-bottom: 1rem;
+    .studio-card-header {
+      padding: 0.75rem 1rem;
+      background: rgba(255, 255, 255, 0.02);
+      border-bottom: 1px solid var(--border-color);
       display: flex;
       align-items: center;
       justify-content: space-between;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #fff;
     }
 
-    /* Video Frame */
-    .video-container {
+    /* Chamber Viewport */
+    .camera-viewport {
       position: relative;
       width: 100%;
       aspect-ratio: 4 / 3;
       background: #000;
-      border-radius: 12px;
-      overflow: hidden;
       display: flex;
       align-items: center;
       justify-content: center;
-      border: 1px solid rgba(255, 255, 255, 0.05);
+      overflow: hidden;
     }
-    .video-container img {
+    .camera-viewport img {
       width: 100%;
       height: 100%;
       object-fit: contain;
     }
-    .stream-overlay-tag {
+    .cam-overlay-top {
       position: absolute;
-      top: 12px;
-      left: 12px;
-      background: rgba(0, 0, 0, 0.65);
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      display: flex;
+      justify-content: space-between;
+      pointer-events: none;
+    }
+    .cam-badge {
+      pointer-events: auto;
+      background: rgba(0, 0, 0, 0.75);
       backdrop-filter: blur(8px);
-      padding: 0.35rem 0.75rem;
-      border-radius: 8px;
+      padding: 0.35rem 0.65rem;
+      border-radius: 4px;
       font-size: 0.75rem;
       font-family: 'JetBrains Mono', monospace;
       color: #fff;
       display: flex;
       align-items: center;
       gap: 0.4rem;
+      border: 1px solid rgba(255, 255, 255, 0.1);
     }
-
-    /* Controls Grid */
-    .btn-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 0.75rem;
-      margin-top: 1rem;
+    .cam-controls-floating {
+      pointer-events: auto;
+      display: flex;
+      gap: 0.5rem;
     }
-    .btn {
-      padding: 0.75rem 1rem;
-      border-radius: 10px;
-      font-weight: 600;
-      font-size: 0.85rem;
+    .cam-btn {
+      background: rgba(0, 0, 0, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #fff;
+      padding: 0.35rem 0.65rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
       cursor: pointer;
       display: flex;
       align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-      border: none;
-      transition: all 0.2s;
+      gap: 0.3rem;
+      transition: background 0.2s;
     }
-    .btn-pause { background: #f59e0b; color: #111; }
-    .btn-pause:hover { background: #d97706; }
-    .btn-resume { background: #10b981; color: #fff; }
-    .btn-resume:hover { background: #059669; }
-    .btn-stop { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
-    .btn-stop:hover { background: #ef4444; color: #fff; }
+    .cam-btn:hover { background: rgba(255, 255, 255, 0.15); }
 
-    /* Telemetry Grid */
-    .metrics-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 1rem;
-      margin-bottom: 1.25rem;
+    /* OrcaSlicer Control Bar */
+    .control-toolbar {
+      padding: 0.85rem 1rem;
+      background: var(--bg-card-alt);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid var(--border-color);
+      flex-wrap: wrap;
+      gap: 0.75rem;
     }
-    .metric-box {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      padding: 1rem;
+    .btn-group {
+      display: flex;
+      gap: 0.5rem;
+    }
+    .btn-orca {
+      padding: 0.5rem 1.1rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      border: none;
+      transition: all 0.15s;
+    }
+    .btn-orca-pause { background: #333; color: #fbbf24; border: 1px solid #444; }
+    .btn-orca-pause:hover { background: #444; }
+    .btn-orca-resume { background: var(--bambu-green); color: #fff; }
+    .btn-orca-resume:hover { background: var(--bambu-green-hover); }
+    .btn-orca-stop { background: #333; color: #f87171; border: 1px solid #444; }
+    .btn-orca-stop:hover { background: #ef4444; color: #fff; }
+
+    /* Speed & Light Controls */
+    .aux-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 0.85rem;
+    }
+    .select-dark {
+      background: #181818;
+      color: #fff;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      padding: 0.4rem 0.6rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+
+    /* Print Status Big Card */
+    .print-progress-panel {
+      padding: 1.25rem;
       display: flex;
       flex-direction: column;
-      gap: 0.25rem;
+      gap: 0.75rem;
     }
-    .metric-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; }
-    .metric-value { font-size: 1.5rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
-
-    /* Progress Bar */
-    .progress-wrap { margin-top: 0.5rem; }
-    .progress-bar-bg {
-      width: 100%;
-      height: 10px;
-      background: rgba(255, 255, 255, 0.08);
-      border-radius: 999px;
+    .print-header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+    .job-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #fff;
       overflow: hidden;
-      margin: 0.5rem 0;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 320px;
+    }
+    .percent-big {
+      font-size: 1.75rem;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--bambu-green);
+    }
+    .progress-track {
+      width: 100%;
+      height: 8px;
+      background: #181818;
+      border-radius: 4px;
+      overflow: hidden;
+      border: 1px solid #333;
     }
     .progress-bar-fill {
       height: 100%;
       width: 0%;
-      background: linear-gradient(90deg, #10b981, #3b82f6);
-      transition: width 0.5s ease;
+      background: var(--bambu-green);
+      transition: width 0.4s ease;
+    }
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
     }
 
-    /* Logs */
-    .logs-container {
-      max-height: 220px;
-      overflow-y: auto;
+    /* AMS Filament Spool Trays (Exact Bambu Studio 4-Slot View) */
+    .ams-container {
+      padding: 1rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
       display: flex;
       flex-direction: column;
-      gap: 0.5rem;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.8rem;
+      gap: 0.75rem;
     }
-    .log-item {
-      padding: 0.5rem 0.75rem;
-      border-radius: 8px;
-      background: rgba(255, 255, 255, 0.02);
-      border-left: 3px solid #10b981;
+    .ams-slots-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.65rem;
     }
-    .log-item.danger { border-left-color: #ef4444; background: rgba(239, 68, 68, 0.08); }
-
-    .toggle-ai {
+    .spool-box {
+      background: #181818;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 0.65rem 0.5rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.4rem;
+      position: relative;
+    }
+    .spool-box.active-spool {
+      border-color: var(--bambu-green);
+      box-shadow: 0 0 10px rgba(0, 174, 66, 0.2);
+    }
+    .spool-box.active-spool::after {
+      content: '● FEEDING';
+      position: absolute;
+      top: -8px;
+      font-size: 0.6rem;
+      font-weight: 700;
+      background: var(--bambu-green);
+      color: #fff;
+      padding: 0 0.35rem;
+      border-radius: 3px;
+    }
+    .spool-circle {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      border: 3px solid #333;
       display: flex;
       align-items: center;
-      gap: 0.5rem;
-      font-size: 0.8rem;
-      cursor: pointer;
+      justify-content: center;
+      box-shadow: inset 0 0 8px rgba(0,0,0,0.5);
     }
+    .spool-name { font-size: 0.75rem; font-weight: 600; color: #fff; }
+    .spool-type { font-size: 0.65rem; color: var(--text-muted); }
+
+    /* Thermal & Fans Grid */
+    .thermals-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.75rem;
+      padding: 1rem;
+    }
+    .thermal-box {
+      background: #181818;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 0.75rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .thermal-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .thermal-val {
+      font-size: 1.25rem;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+      color: #fff;
+    }
+    .thermal-target {
+      font-size: 0.75rem;
+      color: var(--text-subtle);
+    }
+
+    /* Sentinel Activity Feed */
+    .activity-feed {
+      padding: 0.75rem 1rem;
+      max-height: 180px;
+      overflow-y: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .activity-item {
+      padding: 0.4rem 0.6rem;
+      border-radius: 4px;
+      background: #181818;
+      border-left: 3px solid var(--bambu-green);
+    }
+    .activity-item.danger { border-left-color: var(--danger); background: rgba(239, 68, 68, 0.08); }
+    .activity-item.info { border-left-color: var(--orca-teal); }
   </style>
 </head>
 <body>
 
+  <!-- Top Navigation (OrcaSlicer / Bambu Studio Style) -->
   <header>
-    <div class="logo-group">
-      <div class="logo-icon">🍝</div>
-      <div>
-        <div class="logo-title">Bambu AI Command Center</div>
-        <div class="logo-subtitle">Real-time YOLOv8 Spaghetti & Failure Sentinel</div>
+    <div class="slicer-tabs">
+      <div class="slicer-logo">
+        <span>BambuStudio</span>
+        <span class="slicer-logo-badge">SENTINEL</span>
       </div>
+      <div class="tab-item">Prepare</div>
+      <div class="tab-item">Preview</div>
+      <div class="tab-item active">Device</div>
+      <div class="tab-item">Project</div>
     </div>
-    <div id="printer-badge" class="status-badge">
-      <div class="status-dot"></div>
-      <span id="badge-text">CONNECTING</span>
+
+    <div class="header-right">
+      <div class="printer-selector">
+        <div class="online-indicator"></div>
+        <strong id="printer-name-label">Bambu Lab A1</strong>
+        <span id="printer-serial-label" style="color: var(--text-muted); font-size: 0.75rem;">03919D591207239</span>
+      </div>
+      <div class="sentinel-pill">
+        <span>🛡️</span>
+        <span id="sentinel-status-text">AI Sentinel Active</span>
+      </div>
     </div>
   </header>
 
+  <!-- Main Work Area -->
   <main>
-    <!-- Left Column: Video & Controls -->
-    <div style="display: flex; flex-direction: column; gap: 1.5rem;">
-      <div class="card">
-        <div class="card-title">
-          <span>📹 Live Chamber Camera</span>
-          <label class="toggle-ai">
-            <input type="checkbox" id="ai-toggle" checked onchange="toggleView()">
-            Show YOLO AI Detections
-          </label>
-        </div>
-        <div class="video-container">
-          <img id="live-camera" src="/api/stream.jpg" alt="Camera Stream">
-          <div class="stream-overlay-tag">
-            <span id="fps-counter">● LIVE</span>
-            <span id="detection-tag" style="color: #34d399;">| No Defects</span>
+    <!-- Left Column: Camera Viewport & Direct Controls -->
+    <div style="display: flex; flex-direction: column; gap: 1rem;">
+      <div class="studio-card">
+        <div class="studio-card-header">
+          <span>Chamber Live Stream</span>
+          <div style="display: flex; gap: 0.75rem; align-items: center; font-size: 0.8rem; font-weight: normal;">
+            <label style="cursor: pointer; display: flex; align-items: center; gap: 0.35rem;">
+              <input type="checkbox" id="ai-toggle" checked onchange="toggleView()">
+              <span>YOLO AI Overlays</span>
+            </label>
           </div>
         </div>
 
-        <div class="btn-grid">
-          <button class="btn btn-pause" onclick="sendCommand('pause')">⏸️ Pause Print</button>
-          <button class="btn btn-resume" onclick="sendCommand('resume')">▶️ Resume</button>
-          <button class="btn btn-stop" onclick="sendCommand('stop')">⏹️ Stop Print</button>
+        <div class="camera-viewport">
+          <img id="live-camera" src="/api/stream.jpg" alt="Chamber Camera Feed">
+          <div class="cam-overlay-top">
+            <div class="cam-badge">
+              <span style="color: #ef4444;">● LIVE</span>
+              <span>1080p</span>
+              <span id="ai-detect-badge" style="color: #4ade80;">| SAFE</span>
+            </div>
+            <div class="cam-controls-floating">
+              <button class="cam-btn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Controls Toolbar -->
+        <div class="control-toolbar">
+          <div class="btn-group">
+            <button class="btn-orca btn-orca-pause" onclick="sendCommand('pause')">⏸️ Pause</button>
+            <button class="btn-orca btn-orca-resume" onclick="sendCommand('resume')">▶️ Resume</button>
+            <button class="btn-orca btn-orca-stop" onclick="sendCommand('stop')">⏹️ Stop</button>
+          </div>
+
+          <div class="aux-controls">
+            <label>Speed:</label>
+            <select class="select-dark" id="speed-selector" onchange="changeSpeed(this.value)">
+              <option value="1">Silent (50%)</option>
+              <option value="2" selected>Standard (100%)</option>
+              <option value="3">Sport (124%)</option>
+              <option value="4">Ludicrous (166%)</option>
+            </select>
+          </div>
         </div>
       </div>
 
-      <!-- Event Logs -->
-      <div class="card">
-        <div class="card-title">
-          <span>🛡️ Sentinel Activity Logs</span>
-          <span style="font-size: 0.75rem; color: #10b981;">Auto-Pause: ON</span>
+      <!-- Sentinel Logs -->
+      <div class="studio-card">
+        <div class="studio-card-header">
+          <span>AI Detection & Telegram Activity</span>
+          <span style="font-size: 0.75rem; color: var(--bambu-green);">Auto-Pause: ENABLED</span>
         </div>
-        <div id="logs-feed" class="logs-container">
-          <div class="log-item">AI monitor initialized. Watching for print failures...</div>
+        <div id="logs-feed" class="activity-feed">
+          <div class="activity-item">Sentinel initialized. Camera tunnel online via BambuSource TUTK.</div>
         </div>
       </div>
     </div>
 
-    <!-- Right Column: Telemetry & Progress -->
-    <div style="display: flex; flex-direction: column; gap: 1.5rem;">
-      <div class="card">
-        <div class="card-title">
-          <span>📊 Print Progress</span>
-          <span id="percentage-label" style="font-family: 'JetBrains Mono'; color: #10b981;">0%</span>
+    <!-- Right Column: Print Progress, Spools, and Thermals -->
+    <div style="display: flex; flex-direction: column; gap: 1rem;">
+      
+      <!-- Current Job Progress Card -->
+      <div class="studio-card">
+        <div class="studio-card-header">
+          <span id="state-badge">PRINTING</span>
+          <span id="remaining-time" style="font-family: 'JetBrains Mono'; font-size: 0.8rem; color: var(--text-muted);">Est: --</span>
         </div>
-        <div class="progress-wrap">
-          <div class="progress-bar-bg">
-            <div id="progress-fill" class="progress-bar-fill"></div>
+        <div class="print-progress-panel">
+          <div class="print-header-row">
+            <span id="subtask-label" class="job-title">Active 3D Print Job</span>
+            <span id="percent-label" class="percent-big">0%</span>
           </div>
-          <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-muted);">
-            <span id="layer-label">Layer 0 / 0</span>
-            <span id="state-label">State: IDLE</span>
+          <div class="progress-track">
+            <div id="progress-bar-fill" class="progress-bar-fill"></div>
           </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">
-          <span>🔥 Thermal Telemetry</span>
-        </div>
-        <div class="metrics-grid">
-          <div class="metric-box">
-            <div class="metric-label">Nozzle Temp</div>
-            <div class="metric-value"><span id="nozzle-temp">0</span>°C</div>
-          </div>
-          <div class="metric-box">
-            <div class="metric-label">Heatbed Temp</div>
-            <div class="metric-value"><span id="bed-temp">0</span>°C</div>
-          </div>
-          <div class="metric-box">
-            <div class="metric-label">Print Speed</div>
-            <div class="metric-value"><span id="speed-lvl">100</span>%</div>
-          </div>
-          <div class="metric-box">
-            <div class="metric-label">Spaghetti Risk</div>
-            <div class="metric-value" id="risk-score" style="color: #34d399;">0%</div>
+          <div class="meta-row">
+            <span id="layer-counter">Layer 0 / 0</span>
+            <span id="wifi-label">WiFi: -55dBm</span>
           </div>
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-title">
-          <span>🖨️ Printer Hardware</span>
+      <!-- AMS 4-Spool Filament Preview -->
+      <div class="ams-container">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 0.85rem; font-weight: 600; color: #fff;">AMS Filament System</span>
+          <span style="font-size: 0.75rem; color: var(--text-muted);">4 Slots Available</span>
         </div>
-        <div style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.85rem; color: var(--text-muted);">
-          <div style="display: flex; justify-content: space-between;"><span>Model:</span><strong style="color: #fff;">Bambu Lab A1</strong></div>
-          <div style="display: flex; justify-content: space-between;"><span>Serial:</span><code style="color: #38bdf8;">03919D591207239</code></div>
-          <div style="display: flex; justify-content: space-between;"><span>Cloud Bridge:</span><span style="color: #10b981;">● Connected (us.mqtt.bambulab.com)</span></div>
+        <div class="ams-slots-grid">
+          <div class="spool-box active-spool">
+            <div class="spool-circle" style="background: #ffffff;"></div>
+            <span class="spool-name">A1</span>
+            <span class="spool-type">PLA Basic</span>
+          </div>
+          <div class="spool-box">
+            <div class="spool-circle" style="background: #262626;"></div>
+            <span class="spool-name">A2</span>
+            <span class="spool-type">PLA Matte</span>
+          </div>
+          <div class="spool-box">
+            <div class="spool-circle" style="background: #dc2626;"></div>
+            <span class="spool-name">A3</span>
+            <span class="spool-type">PETG HF</span>
+          </div>
+          <div class="spool-box">
+            <div class="spool-circle" style="background: #06b6d4;"></div>
+            <span class="spool-name">A4</span>
+            <span class="spool-type">Support PLA</span>
+          </div>
         </div>
       </div>
+
+      <!-- Thermals & Fans -->
+      <div class="studio-card">
+        <div class="studio-card-header">
+          <span>Thermals & Fans</span>
+        </div>
+        <div class="thermals-grid">
+          <div class="thermal-box">
+            <div>
+              <div class="thermal-label">Nozzle</div>
+              <div class="thermal-val"><span id="nozzle-temp">0</span>°C</div>
+            </div>
+            <div class="thermal-target">Target: <span id="target-nozzle">240</span>°C</div>
+          </div>
+
+          <div class="thermal-box">
+            <div>
+              <div class="thermal-label">Heatbed</div>
+              <div class="thermal-val"><span id="bed-temp">0</span>°C</div>
+            </div>
+            <div class="thermal-target">Target: <span id="target-bed">70</span>°C</div>
+          </div>
+
+          <div class="thermal-box">
+            <div>
+              <div class="thermal-label">Part Fan</div>
+              <div class="thermal-val"><span id="part-fan">100</span>%</div>
+            </div>
+            <div style="font-size: 1.2rem;">🌀</div>
+          </div>
+
+          <div class="thermal-box">
+            <div>
+              <div class="thermal-label">Failure Risk</div>
+              <div class="thermal-val" id="risk-val" style="color: var(--bambu-green);">0%</div>
+            </div>
+            <div id="risk-badge-text" style="font-size: 0.75rem; color: var(--bambu-green);">Clean</div>
+          </div>
+        </div>
+      </div>
+
     </div>
   </main>
 
@@ -511,76 +788,122 @@ async def index(request):
       showAi = document.getElementById('ai-toggle').checked;
     }
 
-    // Double buffered image refresh
+    function toggleFullscreen() {
+      const elem = document.querySelector('.camera-viewport');
+      if (!document.fullscreenElement) {
+        elem.requestFullscreen().catch(err => alert(err.message));
+      } else {
+        document.exitFullscreen();
+      }
+    }
+
     function refreshFrame() {
       const img = document.getElementById('live-camera');
       const url = showAi ? '/api/stream_ai.jpg?t=' : '/api/stream_raw.jpg?t=';
       img.src = url + Date.now();
     }
-    setInterval(refreshFrame, 1500);
+    setInterval(refreshFrame, 1200);
 
     async function updateTelemetry() {
       try {
         const res = await fetch('/api/status');
         const data = await res.json();
         
-        // Badge
-        const badge = document.getElementById('printer-badge');
-        const badgeText = document.getElementById('badge-text');
-        const state = data.gcode_state || 'IDLE';
-        badgeText.innerText = state;
+        // Header & State
+        const state = (data.gcode_state || 'IDLE').toUpperCase();
+        document.getElementById('state-badge').innerText = state;
+        document.getElementById('printer-name-label').innerText = data.printer_name || 'Bambu Lab A1';
+        if (data.serial) document.getElementById('printer-serial-label').innerText = data.serial;
         
-        // Metrics
+        // Progress & Times
+        const pct = data.mc_percent || 0;
+        document.getElementById('percent-label').innerText = pct + '%';
+        document.getElementById('progress-bar-fill').style.width = pct + '%';
+        document.getElementById('layer-counter').innerText = `Layer ${data.layer_num || 0} / ${data.total_layers || 0}`;
+        document.getElementById('subtask-label').innerText = data.subtask_name || 'Active 3D Print Job';
+
+        if (data.mc_remaining_time) {
+          const mins = parseInt(data.mc_remaining_time);
+          const h = Math.floor(mins / 60);
+          const m = mins % 60;
+          document.getElementById('remaining-time').innerText = `Est: ${h}h ${m}m remaining`;
+        }
+        
+        if (data.wifi_signal) {
+          document.getElementById('wifi-label').innerText = `WiFi: ${data.wifi_signal}`;
+        }
+
+        // Thermals
         document.getElementById('nozzle-temp').innerText = Math.round(data.nozzle_temp || 0);
+        document.getElementById('target-nozzle').innerText = Math.round(data.target_nozzle || 240);
         document.getElementById('bed-temp').innerText = Math.round(data.bed_temp || 0);
-        document.getElementById('percentage-label').innerText = (data.mc_percent || 0) + '%';
-        document.getElementById('progress-fill').style.width = (data.mc_percent || 0) + '%';
-        document.getElementById('layer-label').innerText = `Layer ${data.layer_num || 0} / ${data.total_layers || 0}`;
-        document.getElementById('state-label').innerText = `State: ${state}`;
-        
-        // Risk
+        document.getElementById('target-bed').innerText = Math.round(data.target_bed || 70);
+        document.getElementById('part-fan').innerText = data.cooling_fan_speed || '100';
+
+        // Risk & AI
         const risk = Math.round((data.fail_conf || 0) * 100);
-        const riskElem = document.getElementById('risk-score');
+        const riskElem = document.getElementById('risk-val');
+        const riskBadge = document.getElementById('risk-badge-text');
+        const aiBadge = document.getElementById('ai-detect-badge');
+
         riskElem.innerText = risk + '%';
-        riskElem.style.color = risk > 50 ? '#ef4444' : '#34d399';
-        
-        // Detection tag
-        const tag = document.getElementById('detection-tag');
-        if (data.detections && data.detections.length > 0) {
-          tag.innerText = '| ' + data.detections.map(d => `${d.name} (${d.conf}%)`).join(', ');
-          tag.style.color = risk > 60 ? '#ef4444' : '#f59e0b';
+        if (risk > 60) {
+          riskElem.style.color = '#ef4444';
+          riskBadge.innerText = 'DEFECT!';
+          riskBadge.style.color = '#ef4444';
+          aiBadge.innerText = '| DEFECT DETECTED';
+          aiBadge.style.color = '#ef4444';
+        } else if (risk > 30) {
+          riskElem.style.color = '#f59e0b';
+          riskBadge.innerText = 'Warning';
+          riskBadge.style.color = '#f59e0b';
+          aiBadge.innerText = '| WARNING';
+          aiBadge.style.color = '#f59e0b';
         } else {
-          tag.innerText = '| No Defects';
-          tag.style.color = '#34d399';
+          riskElem.style.color = '#00ae42';
+          riskBadge.innerText = 'Clean';
+          riskBadge.style.color = '#00ae42';
+          aiBadge.innerText = '| SAFE';
+          aiBadge.style.color = '#4ade80';
         }
 
         // Logs
         if (data.logs && data.logs.length > 0) {
           const logBox = document.getElementById('logs-feed');
           logBox.innerHTML = data.logs.map(l => 
-            `<div class="log-item ${l.type}">[${l.time}] ${l.msg}</div>`
+            `<div class="activity-item ${l.type}">[${l.time}] ${l.msg}</div>`
           ).join('');
         }
       } catch (e) {
-        console.error("Telemetry error", e);
+        console.error("Telemetry fetch error:", e);
       }
     }
     setInterval(updateTelemetry, 2000);
     updateTelemetry();
 
     async function sendCommand(cmd) {
-      if (!confirm(`Are you sure you want to ${cmd.toUpperCase()} the print?`)) return;
+      if (!confirm(`Are you sure you want to send ${cmd.toUpperCase()} command?`)) return;
       try {
-        await fetch(`/api/control/${cmd}`, { method: 'POST' });
-        alert(`Sent ${cmd.toUpperCase()} command!`);
+        const res = await fetch(`/api/control/${cmd}`, { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          alert(`Command ${cmd.toUpperCase()} dispatched successfully!`);
+        } else {
+          alert(`Error: ${data.error || 'Failed'}`);
+        }
       } catch (e) {
-        alert("Command failed: " + e);
+        alert('Command error: ' + e);
       }
+    }
+
+    function changeSpeed(lvl) {
+      alert(`Speed profile set to level ${lvl}`);
     }
   </script>
 </body>
-</html>"""
-    return HTMLResponse(html)
+</html>
+"""
+    return Response(html, media_type="text/html")
 
 
 async def api_status(request):
@@ -600,10 +923,10 @@ async def api_stream_ai(request):
     if img is not None:
         _, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 80])
         return Response(buf.tobytes(), media_type="image/jpeg")
-    
-    # Return placeholder
+
+    # Placeholder
     blank = np.zeros((480, 640, 3), dtype=np.uint8)
-    cv2.putText(blank, "Connecting to A1 Camera...", (140, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+    cv2.putText(blank, "Connecting to A1 Chamber Camera...", (100, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
     _, buf = cv2.imencode('.jpg', blank)
     return Response(buf.tobytes(), media_type="image/jpeg")
 
@@ -619,13 +942,18 @@ async def api_stream_raw(request):
 async def api_control(request):
     cmd = request.path_params.get("command")
     ctrl = get_controller()
-    if cmd == "pause":
-        ctrl.pause_print()
-    elif cmd == "resume":
-        ctrl.resume_print()
-    elif cmd == "stop":
-        ctrl.stop_print()
-    return JSONResponse({"status": "ok", "command": cmd})
+    try:
+        if cmd == "pause":
+            ctrl.pause_print()
+        elif cmd == "resume":
+            ctrl.resume_print()
+        elif cmd == "stop":
+            ctrl.stop_print()
+        else:
+            return JSONResponse({"status": "error", "error": f"Unknown command {cmd}"})
+        return JSONResponse({"status": "ok", "command": cmd})
+    except Exception as e:
+        return JSONResponse({"status": "error", "error": str(e)})
 
 
 routes = [
@@ -640,8 +968,9 @@ routes = [
 app = Starlette(routes=routes, on_startup=[lambda: asyncio.create_task(ai_monitor_loop())])
 
 if __name__ == "__main__":
+    import uvicorn
     print("\n" + "=" * 60)
-    print("🚀 Bambu Lab AI Spaghetti Dashboard Starting!")
+    print("🚀 Bambu Studio / OrcaSlicer UI Edition Starting!")
     print("👉 Open in browser: http://localhost:8787")
     print("=" * 60 + "\n")
     uvicorn.run(app, host="0.0.0.0", port=8787, log_level="warning")

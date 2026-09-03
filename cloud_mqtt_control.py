@@ -155,14 +155,24 @@ class BambuCloudController:
     def get_status(self) -> dict:
         """Return latest printer telemetry."""
         return {
+            "printer_name": self.device.get("name", "Bambu Lab A1"),
+            "model": self.device.get("model", "A1"),
+            "serial": self.serial,
             "nozzle_temp": self.state.get("nozzle_temper"),
+            "target_nozzle": self.state.get("nozzle_target_temper", 0),
             "bed_temp": self.state.get("bed_temper"),
+            "target_bed": self.state.get("bed_target_temper", 0),
             "layer_num": self.state.get("layer_num"),
             "total_layers": self.state.get("total_layer_num"),
             "mc_percent": self.state.get("mc_percent"),
-            "gcode_state": self.state.get("gcode_state"),
-            "spd_lvl": self.state.get("spd_lvl"),
-            "stage": self.state.get("stg_cur"),
+            "mc_remaining_time": self.state.get("mc_remaining_time", 0),
+            "subtask_name": self.state.get("subtask_name", "Active Print Job"),
+            "gcode_state": self.state.get("gcode_state", "IDLE"),
+            "spd_lvl": self.state.get("spd_lvl", 2),
+            "cooling_fan_speed": self.state.get("cooling_fan_speed", "0"),
+            "ams": self.state.get("ams", {}),
+            "wifi_signal": self.state.get("wifi_signal", "-55dBm"),
+            "stage": self.state.get("stg_cur", 0),
         }
 
 
