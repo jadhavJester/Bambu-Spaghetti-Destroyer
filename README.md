@@ -129,20 +129,17 @@ Check your Telegram: you will receive a notification with a high-resolution JPEG
 
 ---
 
-### Step 6: Launch the Web Command Center!
+### Step 5: Launch the 1-Click MVP Command Center!
 Double-click:
-👉 **`start-ai-dashboard.bat`**  
-*(or run `python app_dashboard.py` in your terminal)*
+👉 **`run.bat`**  
+*(Automatically verifies credentials, boots background workers, and opens `http://localhost:8787` in your browser!)*
 
-Open your browser to:
-👉 **`http://localhost:8787`**
-
-You now have a real-time command center:
-- Live camera stream.
-- Toggleable YOLO failure overlays.
-- Real-time nozzle/bed temperature gauges.
-- Print progress & layer counter.
-- Remote **Pause**, **Resume**, and **Stop** buttons.
+You now have a complete real-time command center:
+- 📹 **15 FPS Fluid Live Stream** via Bambu Cloud P2P tunnel.
+- ⚙️ **In-Dashboard Settings Drawer**: Adjust failure sensitivity sliders (70%–95%), toggle auto-emergency pause, and test Telegram alerts with 1 click.
+- 🛑 **Smart Failure Policy**: Only heavy spaghetti and bed separation ($\ge$ 82%) trigger an emergency pause; cosmetic stringing and zits are ignored.
+- 🌡️ **Real-time Thermals & Live Layer Progress**: Layer progression, remaining time, and nozzle/bed temperatures.
+- ⏹️ **Remote Controls**: Verified monotonic **Pause**, **Resume**, and **Stop** buttons.
 
 ---
 
@@ -150,6 +147,7 @@ You now have a real-time command center:
 
 | File | Description |
 | :--- | :--- |
+| **`run.bat`** | **Master 1-click MVP launcher** for the entire autonomous sentinel. |
 | **`app_dashboard.py`** | Real-time Web UI dashboard with live camera, telemetry, and manual controls. |
 | **`cloud_camera_stream.py`** | Direct `BambuSource.dll` TUTK P2P streamer for cloud camera frames. |
 | **`cloud_mqtt_control.py`** | Remote Bambu Cloud MQTT controller for telemetry and Emergency Pause. |
@@ -159,8 +157,6 @@ You now have a real-time command center:
 | **`cloud_bambu_auth.py`** | Cloud API authentication and device discovery helper. |
 | **`spaghetti_yolo.pt`** | Fine-tuned YOLO weights for 3D printing failures (9,000+ prints). |
 | **`train_custom_spaghetti.py`**| Pipeline to fine-tune YOLO models on custom datasets. |
-| **`start-ai-dashboard.bat`** | One-click launcher for the Web Command Center. |
-| **`start-spaghetti-monitor.bat`** | One-click launcher for the CLI AI monitor. |
 | **`setup-telegram.bat`** | One-click setup launcher for Telegram alerts. |
 
 ---

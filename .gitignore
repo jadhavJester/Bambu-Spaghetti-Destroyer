@@ -4,6 +4,7 @@
 cloud_credentials.json
 printer.local.json
 filament.local.json
+config.json
 
 # Cache & Images
 *.jpg

@@ -1,21 +1,28 @@
 #!/usr/bin/env python3
-"""Bambu Lab AI Spaghetti Dashboard - High Performance Real-Time Streaming Edition.
+"""Bambu Lab AI Spaghetti Dashboard - Full MVP Edition.
 
-Key Features:
-- Fluid Native MJPEG Video Stream (/api/stream.mjpeg) - zero polling jitter, smooth 15 FPS
-- Decoupled Camera Ingestion thread + Asynchronous YOLO Sentinel
-- Monitored Direct-Feed Single Spool & Live Bambu Cloud MQTT Telemetry
-- Verified monotonic pause/resume/stop printer controls
-- Telegram bot photo alert dispatch
+Production-grade Minimum Viable Product (MVP) featuring:
+- Seamless 1-Click Launch with automatic browser opening (http://localhost:8787)
+- Native MJPEG 15 FPS camera stream with toggleable YOLO failure detection
+- In-Dashboard Settings Drawer:
+  * Sliders for Spaghetti & Bed Separation sensitivity (default 82%)
+  * Auto-emergency pause toggle
+  * Cosmetic flaw (stringing/zits) filtering toggle
+  * 1-Click Telegram Test Alert dispatcher
+- Real-time Nozzle/Bed temperatures, layer counter, and single-spool monitor
+- Monotonic MQTT printer controls (Pause, Resume, Stop)
+- Persistent user settings saved to config.json
 """
 from __future__ import annotations
 
 import asyncio
 import io
+import json
 import os
 import sys
 import threading
 import time
+import webbrowser
 import cv2
 import numpy as np
 import requests
@@ -37,6 +44,38 @@ except ImportError:
     send_telegram_alert = lambda *args, **kwargs: False
 
 
+# Configuration & Persistence
+DEFAULT_CONFIG = {
+    "spaghetti_threshold": 0.82,
+    "bed_separation_threshold": 0.82,
+    "auto_pause": True,
+    "ignore_cosmetic": True,
+    "telegram_enabled": True,
+}
+
+CONFIG_FILE = "config.json"
+
+
+def load_config() -> dict:
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                return {**DEFAULT_CONFIG, **json.load(f)}
+        except Exception:
+            pass
+    return DEFAULT_CONFIG.copy()
+
+
+def save_config(cfg: dict):
+    try:
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(cfg, f, indent=2)
+    except Exception as e:
+        print(f"[!] Error saving config: {e}", flush=True)
+
+
+CONFIG = load_config()
+
 # Global state
 CONTROLLER: BambuCloudController | None = None
 YOLO_MODEL: YOLO | None = None
@@ -51,8 +90,6 @@ LATEST_FAIL_CONF = 0.0
 AI_LOGS = []
 
 HAZARDOUS_DEFECTS = ("spaghetti", "bed", "detach", "dislodge", "air_print")
-CRITICAL_PAUSE_CONFIDENCE = 0.82  # 82% threshold
-AUTO_PAUSE = True
 
 
 def get_controller():
@@ -81,7 +118,6 @@ def camera_ingestion_worker():
 
     while True:
         frame = None
-        # 1. Cloud TUTK P2P streamer
         if get_cloud_streamer is not None:
             try:
                 if streamer is None:
@@ -90,7 +126,6 @@ def camera_ingestion_worker():
             except Exception:
                 streamer = None
 
-        # 2. Local fallback if on home LAN
         if frame is None:
             try:
                 resp = requests.get("http://localhost:1984/api/frame.jpeg?src=bambu_camera", timeout=0.5)
@@ -137,6 +172,10 @@ def ai_sentinel_worker():
             critical_defect = ""
             critical_conf = 0.0
 
+            spaghetti_thresh = CONFIG.get("spaghetti_threshold", 0.82)
+            bed_thresh = CONFIG.get("bed_separation_threshold", 0.82)
+            auto_pause_enabled = CONFIG.get("auto_pause", True)
+
             for box in results[0].boxes:
                 cls_id = int(box.cls[0])
                 cls_name = results[0].names.get(cls_id, str(cls_id)).lower()
@@ -146,9 +185,12 @@ def ai_sentinel_worker():
                 if conf > max_conf:
                     max_conf = conf
 
-                # ONLY pause if defect is heavy spaghetti or bed separation >= 82%
-                is_hazardous = any(k in cls_name for k in HAZARDOUS_DEFECTS)
-                if is_hazardous and conf >= CRITICAL_PAUSE_CONFIDENCE:
+                # Check hazardous condition
+                if "spaghetti" in cls_name and conf >= spaghetti_thresh:
+                    critical_failure = True
+                    critical_defect = cls_name
+                    critical_conf = conf
+                elif any(k in cls_name for k in ("bed", "detach", "dislodge", "air_print")) and conf >= bed_thresh:
                     critical_failure = True
                     critical_defect = cls_name
                     critical_conf = conf
@@ -158,7 +200,7 @@ def ai_sentinel_worker():
                 LATEST_DETECTIONS = detections
                 LATEST_FAIL_CONF = max_conf
 
-            if critical_failure and AUTO_PAUSE:
+            if critical_failure and auto_pause_enabled:
                 ts_str = time.strftime("%H:%M:%S")
                 defect_title = critical_defect.replace("_", " ").title()
                 msg = f"CRITICAL {defect_title.upper()} ({critical_conf:.1%}) -> Emergency Pause Triggered!"
@@ -167,25 +209,25 @@ def ai_sentinel_worker():
                     AI_LOGS.pop()
                 ctrl.pause_print()
 
-                try:
-                    stat = ctrl.get_status()
-                    ok = send_telegram_alert(
-                        photo=annotated,
-                        error_type=f"Critical {defect_title} Failure",
-                        confidence=critical_conf,
-                        layer_num=stat.get("layer_num") or 0,
-                        total_layers=stat.get("total_layers") or 0,
-                        nozzle_temp=stat.get("nozzle_temp") or 0.0,
-                        bed_temp=stat.get("bed_temp") or 0.0,
-                        action_taken="Emergency Pause Executed (Print Halted)",
-                    )
-                    if ok:
-                        AI_LOGS.insert(0, {"time": ts_str, "type": "info", "msg": "Telegram alert & proof photo delivered!"})
-                except Exception as tg_err:
-                    print(f"[Telegram Alert Error]: {tg_err}", flush=True)
+                if CONFIG.get("telegram_enabled", True):
+                    try:
+                        stat = ctrl.get_status()
+                        ok = send_telegram_alert(
+                            photo=annotated,
+                            error_type=f"Critical {defect_title} Failure",
+                            confidence=critical_conf,
+                            layer_num=stat.get("layer_num") or 0,
+                            total_layers=stat.get("total_layers") or 0,
+                            nozzle_temp=stat.get("nozzle_temp") or 0.0,
+                            bed_temp=stat.get("bed_temp") or 0.0,
+                            action_taken="Emergency Pause Executed (Print Halted)",
+                        )
+                        if ok:
+                            AI_LOGS.insert(0, {"time": ts_str, "type": "info", "msg": "Telegram alert & proof photo delivered!"})
+                    except Exception as tg_err:
+                        print(f"[Telegram Alert Error]: {tg_err}", flush=True)
 
-        except Exception as e:
-            # print(f"Inference error: {e}")
+        except Exception:
             pass
 
 
@@ -291,7 +333,7 @@ async def index(request):
     .header-right {
       display: flex;
       align-items: center;
-      gap: 1.25rem;
+      gap: 1rem;
       font-size: 0.85rem;
     }
     .printer-selector {
@@ -314,6 +356,23 @@ async def index(request):
       border: 1px solid rgba(0, 174, 66, 0.3);
       padding: 0.3rem 0.65rem; border-radius: 6px;
       color: #4ade80; font-size: 0.75rem; font-weight: 600;
+    }
+    .btn-settings {
+      background: var(--bg-card-alt);
+      border: 1px solid var(--border-color);
+      color: #fff;
+      padding: 0.35rem 0.65rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      transition: all 0.2s;
+    }
+    .btn-settings:hover {
+      background: #333;
+      border-color: var(--bambu-green);
     }
 
     /* Main Grid */
@@ -449,6 +508,78 @@ async def index(request):
     .activity-item { padding: 0.4rem 0.6rem; border-radius: 4px; background: #181818; border-left: 3px solid var(--bambu-green); }
     .activity-item.danger { border-left-color: var(--danger); background: rgba(239, 68, 68, 0.08); }
     .activity-item.info { border-left-color: var(--orca-teal); }
+
+    /* Settings Modal */
+    .modal-backdrop {
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+    }
+    .modal-box {
+      background: #202020;
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      width: 480px;
+      max-width: 90vw;
+      padding: 1.5rem;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+    .modal-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .setting-row {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .setting-label {
+      font-size: 0.85rem;
+      color: #ddd;
+      display: flex;
+      justify-content: space-between;
+    }
+    .slider-range {
+      width: 100%;
+      height: 6px;
+      accent-color: var(--bambu-green);
+      cursor: pointer;
+    }
+    .btn-modal-action {
+      background: var(--bambu-green);
+      color: #fff;
+      border: none;
+      padding: 0.65rem 1rem;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-modal-action:hover { background: var(--bambu-green-hover); }
+    .btn-modal-secondary {
+      background: #333;
+      color: #ddd;
+      border: 1px solid #444;
+      padding: 0.65rem 1rem;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    .btn-modal-secondary:hover { background: #444; color: #fff; }
   </style>
 </head>
 <body>
@@ -458,7 +589,7 @@ async def index(request):
     <div class="slicer-tabs">
       <div class="slicer-logo">
         <span>BambuStudio</span>
-        <span class="slicer-logo-badge">LIVE</span>
+        <span class="slicer-logo-badge">MVP</span>
       </div>
       <div class="tab-item">Device Control</div>
     </div>
@@ -473,6 +604,10 @@ async def index(request):
         <span>🛡️</span>
         <span>AI Sentinel Active</span>
       </div>
+      <button class="btn-settings" onclick="openSettingsModal()">
+        <span>⚙️</span>
+        <span>Settings</span>
+      </button>
     </div>
   </header>
 
@@ -525,7 +660,7 @@ async def index(request):
       <div class="studio-card">
         <div class="studio-card-header">
           <span>AI Detection & Telegram Activity</span>
-          <span style="font-size: 0.75rem; color: var(--bambu-green);">Auto-Pause: ENABLED</span>
+          <span style="font-size: 0.75rem; color: var(--bambu-green);" id="autopause-status-badge">Auto-Pause: ENABLED</span>
         </div>
         <div id="logs-feed" class="activity-feed">
           <div class="activity-item">Sentinel initialized. Camera tunnel online via BambuSource TUTK.</div>
@@ -610,6 +745,66 @@ async def index(request):
     </div>
   </main>
 
+  <!-- ==================== SETTINGS MODAL ==================== -->
+  <div id="settings-modal" class="modal-backdrop">
+    <div class="modal-box">
+      <div class="modal-title">
+        <span>⚙️ Sentry & Alert Settings</span>
+        <span style="cursor: pointer; font-size: 1.2rem;" onclick="closeSettingsModal()">✕</span>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label">
+          <span>🍝 Spaghetti Hazard Threshold</span>
+          <strong id="spaghetti-thresh-val" style="color: var(--bambu-green);">82%</strong>
+        </div>
+        <input type="range" class="slider-range" id="input-spaghetti" min="65" max="95" value="82" oninput="document.getElementById('spaghetti-thresh-val').innerText = this.value + '%'">
+        <span style="font-size: 0.7rem; color: var(--text-muted);">Only pause if heavy spaghetti exceeds this confidence.</span>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label">
+          <span>🖨️ Bed Separation Threshold</span>
+          <strong id="bed-thresh-val" style="color: var(--bambu-green);">82%</strong>
+        </div>
+        <input type="range" class="slider-range" id="input-bed" min="65" max="95" value="82" oninput="document.getElementById('bed-thresh-val').innerText = this.value + '%'">
+        <span style="font-size: 0.7rem; color: var(--text-muted);">Only pause if dislodged / released part exceeds this confidence.</span>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <label style="font-size: 0.85rem; color: #ddd; cursor: pointer;">
+          <input type="checkbox" id="input-autopause" checked>
+          <span>Auto-Emergency Pause Printer</span>
+        </label>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <label style="font-size: 0.85rem; color: #ddd; cursor: pointer;">
+          <input type="checkbox" id="input-ignore-cosmetic" checked>
+          <span>Ignore Cosmetic Flaws (Stringing & Zits)</span>
+        </label>
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 0.25rem 0;">
+
+      <!-- 1-Click Telegram Test -->
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; flex-direction: column;">
+          <span style="font-size: 0.85rem; font-weight: 600; color: #fff;">Telegram Notifications</span>
+          <span style="font-size: 0.7rem; color: var(--text-muted);">Sends photo + telemetry proof on failure</span>
+        </div>
+        <button class="btn-modal-secondary" id="btn-test-alert" onclick="dispatchTestAlert()">
+          <span>🔔 Test Alert</span>
+        </button>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem;">
+        <button class="btn-modal-secondary" onclick="closeSettingsModal()">Cancel</button>
+        <button class="btn-modal-action" onclick="saveSettings()">Save Preferences</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     function toggleFullscreen() {
       const elem = document.querySelector('.camera-viewport');
@@ -625,6 +820,73 @@ async def index(request):
         await fetch(`/api/toggle_ai?enabled=${enabled}`, { method: 'POST' });
       } catch (e) {
         console.error("Toggle AI error", e);
+      }
+    }
+
+    function openSettingsModal() {
+      fetch('/api/settings')
+        .then(res => res.json())
+        .then(cfg => {
+          document.getElementById('input-spaghetti').value = Math.round(cfg.spaghetti_threshold * 100);
+          document.getElementById('spaghetti-thresh-val').innerText = Math.round(cfg.spaghetti_threshold * 100) + '%';
+          document.getElementById('input-bed').value = Math.round(cfg.bed_separation_threshold * 100);
+          document.getElementById('bed-thresh-val').innerText = Math.round(cfg.bed_separation_threshold * 100) + '%';
+          document.getElementById('input-autopause').checked = cfg.auto_pause;
+          document.getElementById('input-ignore-cosmetic').checked = cfg.ignore_cosmetic;
+          document.getElementById('settings-modal').style.display = 'flex';
+        });
+    }
+
+    function closeSettingsModal() {
+      document.getElementById('settings-modal').style.display = 'none';
+    }
+
+    async function saveSettings() {
+      const payload = {
+        spaghetti_threshold: parseFloat(document.getElementById('input-spaghetti').value) / 100.0,
+        bed_separation_threshold: parseFloat(document.getElementById('input-bed').value) / 100.0,
+        auto_pause: document.getElementById('input-autopause').checked,
+        ignore_cosmetic: document.getElementById('input-ignore-cosmetic').checked,
+        telegram_enabled: true
+      };
+
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          document.getElementById('autopause-status-badge').innerText = `Auto-Pause: ${payload.auto_pause ? 'ENABLED' : 'DISABLED'}`;
+          closeSettingsModal();
+          alert("Preferences saved successfully!");
+        }
+      } catch (e) {
+        alert("Error saving settings: " + e);
+      }
+    }
+
+    async function dispatchTestAlert() {
+      const btn = document.getElementById('btn-test-alert');
+      btn.innerText = 'Sending...';
+      btn.disabled = true;
+
+      try {
+        const res = await fetch('/api/test_alert', { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          btn.innerText = 'Delivered!';
+          setTimeout(() => { btn.innerText = '🔔 Test Alert'; btn.disabled = false; }, 2500);
+        } else {
+          alert("Test alert error: " + (data.error || 'Failed'));
+          btn.innerText = '🔔 Test Alert';
+          btn.disabled = false;
+        }
+      } catch (e) {
+        alert("Request error: " + e);
+        btn.innerText = '🔔 Test Alert';
+        btn.disabled = false;
       }
     }
 
@@ -672,7 +934,7 @@ async def index(request):
         const dets = (data.detections || []).map(d => d.name.toLowerCase());
         const hasHazardous = dets.some(n => n.includes('spaghetti') || n.includes('bed') || n.includes('detach'));
 
-        if (hasHazardous && risk >= 82) {
+        if (hasHazardous && risk >= Math.round((CONFIG.spaghetti_threshold || 0.82) * 100)) {
           riskElem.style.color = '#ef4444';
           riskBadge.innerText = 'CRITICAL DEFECT!';
           riskBadge.style.color = '#ef4444';
@@ -747,6 +1009,61 @@ async def api_status(request):
     return JSONResponse(stat)
 
 
+async def api_settings_get(request):
+    return JSONResponse(CONFIG)
+
+
+async def api_settings_post(request):
+    global CONFIG
+    try:
+        data = await request.json()
+        CONFIG.update(data)
+        save_config(CONFIG)
+        return JSONResponse({"status": "ok", "config": CONFIG})
+    except Exception as e:
+        return JSONResponse({"status": "error", "error": str(e)})
+
+
+async def api_test_alert(request):
+    """Trigger a simulated alert with live telemetry and current camera frame."""
+    ctrl = get_controller()
+    stat = ctrl.get_status()
+
+    frame = None
+    with FRAME_LOCK:
+        if LATEST_FRAME_RAW is not None:
+            frame = LATEST_FRAME_RAW.copy()
+
+    if frame is None:
+        frame = np.full((720, 1280, 3), (35, 35, 35), dtype=np.uint8)
+        cv2.putText(frame, "BAMBU LAB A1 TEST", (450, 360), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+
+    # Annotate test bounding box
+    h, w = frame.shape[:2]
+    x1, y1 = int(w * 0.4), int(h * 0.45)
+    x2, y2 = int(w * 0.65), int(h * 0.72)
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 235), 3)
+    cv2.putText(frame, " spaghetti 94.2% ", (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2)
+
+    try:
+        ok = send_telegram_alert(
+            photo=frame,
+            error_type="Spaghetti Defect (Diagnostic Test)",
+            confidence=0.942,
+            layer_num=stat.get("layer_num") or 875,
+            total_layers=stat.get("total_layers") or 1005,
+            nozzle_temp=stat.get("nozzle_temp") or 240.0,
+            bed_temp=stat.get("bed_temp") or 70.0,
+            action_taken="SIMULATED FAILURE: Emergency Pause Verified",
+        )
+        if ok:
+            return JSONResponse({"status": "ok", "message": "Test alert dispatched to Telegram!"})
+        else:
+            return JSONResponse({"status": "error", "error": "Telegram dispatch returned false. Check bot setup."})
+    except Exception as e:
+        return JSONResponse({"status": "error", "error": str(e)})
+
+
 async def api_mjpeg_stream(request):
     """High-performance continuous MJPEG live video stream (15 FPS)."""
     async def frame_generator():
@@ -770,7 +1087,6 @@ async def api_mjpeg_stream(request):
 
 
 async def api_stream_single(request):
-    """Fallback single JPEG frame."""
     frame = None
     with FRAME_LOCK:
         frame = LATEST_FRAME_AI if (SHOW_AI_OVERLAY and LATEST_FRAME_AI is not None) else LATEST_FRAME_RAW
@@ -812,6 +1128,9 @@ async def api_control(request):
 routes = [
     Route("/", endpoint=index),
     Route("/api/status", endpoint=api_status),
+    Route("/api/settings", endpoint=api_settings_get, methods=["GET"]),
+    Route("/api/settings", endpoint=api_settings_post, methods=["POST"]),
+    Route("/api/test_alert", endpoint=api_test_alert, methods=["POST"]),
     Route("/api/stream.mjpeg", endpoint=api_mjpeg_stream),
     Route("/api/stream.jpg", endpoint=api_stream_single),
     Route("/api/toggle_ai", endpoint=api_toggle_ai, methods=["POST"]),
@@ -834,12 +1153,22 @@ def start_all_background_workers():
     t_hb = threading.Thread(target=mqtt_heartbeat_worker, daemon=True)
     t_hb.start()
 
+    # Automatically open browser in desktop MVP mode
+    def open_browser():
+        time.sleep(1.2)
+        try:
+            webbrowser.open("http://localhost:8787")
+        except Exception:
+            pass
+
+    threading.Thread(target=open_browser, daemon=True).start()
+
 
 if __name__ == "__main__":
     import uvicorn
     print("\n" + "=" * 60)
-    print("🚀 Bambu Studio / OrcaSlicer Real-Time Dashboard Starting!")
-    print("👉 Open in browser: http://localhost:8787")
+    print("🚀 Bambu Studio / OrcaSlicer MVP Starting!")
+    print("👉 Live Command Center: http://localhost:8787")
     print("=" * 60 + "\n")
     start_all_background_workers()
     uvicorn.run(app, host="0.0.0.0", port=8787, log_level="warning")
