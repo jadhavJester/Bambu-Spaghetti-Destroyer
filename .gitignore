@@ -1,59 +1,37 @@
-# Cấu hình máy in THẬT — chứa host / serial / access_code (LAN access code).
-# Dùng printer.local.example.json làm khuôn; chạy `python bambu_connect.py` để sinh file này.
-printer.local.json
-
-# Secret dạng .env (cùng mức bảo vệ: plaintext, chỉ tránh commit nhầm).
+# Secrets & Credentials
 .env
-Chunnu/.env
+*.env
 cloud_credentials.json
+printer.local.json
+filament.local.json
+
+# Cache & Images
 *.jpg
 *.jpeg
+*.png
+!a1-img/
+failure_detected_*.jpg
+failure_simulation.jpg
 
-# Dữ liệu cục bộ theo người dùng — KHÔNG commit (comment phải ở dòng riêng)
-# gam nhựa từng cuộn (theo tag_uid RFID)
-filament.local.json
-# cache ảnh model + gam + thông số từng file in tải qua FTP
-job_cache/
-
-# KHÔNG BAO GIỜ tạo lại file này: Claude Code tự nạp project-scoped MCP server từ .mcp.json,
-# tức là trao quyền điều khiển máy in (in / huỷ / chỉnh nhiệt / xoá file) cho AI.
-# Mọi điều khiển phải do người dùng bấm trên web dashboard. Xem README mục "Bảo mật".
-.mcp.json
-
-# Local tooling
-.claude/settings.local.json
-.qodo/
-temp/
-
-# Trang lỗi HTTP bị lưu nhầm thành .json (429 / 404), không phải dữ liệu.
-# Muốn commit vẫn được: git add -f A1_04.json A1_base.json
-A1_04.json
-A1_base.json
-
-# Artifacts
+# Python Cache & Virtual Environments
 __pycache__/
-*.pyc
-node_modules/
-*.gcode
-*.gcode.3mf
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
 
-# File tam cua pipeline slice tren server (upload -> CLI slice -> day xuong may)
-slice_jobs/
-
-# Log server
+# Logs & Temporary Artifacts
+*.log
 dashboard.log
 server.log
+temp/
+job_cache/
+slice_jobs/
+runs/
 
-# nhat ky gui thong bao (runtime)
-notify.log
-ai_usage.json
-
-# Audit tam (chay lai bang audit_all.py)
-audit_out*.jsonl
-audit_run*.log
-hub_new.log
-ai_model.txt
-
-# Slack: kenh DM user nhan gan nhat (state runtime, bot tu ghi de day canh bao)
-slack_target.txt
-server*.log
+# Local folders & third-party tools
+Chunnu/
+.claude/
+.qodo/
+node_modules/
