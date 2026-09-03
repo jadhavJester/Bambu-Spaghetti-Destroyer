@@ -100,23 +100,28 @@ class CloudCameraStreamer:
             try:
                 url = self._mint_ttcode()
                 ret = self.lib.Bambu_Create(ctypes.byref(tunnel), url.encode("utf-8"))
-                if ret != 0:
+                if ret != 0 or not tunnel.value:
                     time.sleep(3)
                     continue
 
                 # Poll open
                 t0 = time.time()
                 connected = False
-                while self._running and time.time() - t0 < 10:
+                last_err = 0
+                while self._running and time.time() - t0 < 8:
                     r = self.lib.Bambu_Open(tunnel)
+                    last_err = r
                     if r == 0:
                         connected = True
                         break
-                    time.sleep(0.3)
+                    elif r == 2:  # would block
+                        time.sleep(0.3)
+                    else:
+                        break
 
                 if not connected:
-                    self.lib.Bambu_Close(tunnel)
-                    self.lib.Bambu_Destroy(tunnel)
+                    if last_err == -90:
+                        print("[Camera] Note: Printer camera is currently in use by Bambu Studio / Handy (error -90). Retrying...", flush=True)
                     time.sleep(3)
                     continue
 
@@ -141,11 +146,16 @@ class CloudCameraStreamer:
             except Exception as e:
                 time.sleep(3)
             finally:
-                try:
-                    self.lib.Bambu_Close(tunnel)
-                    self.lib.Bambu_Destroy(tunnel)
-                except Exception:
-                    pass
+                if tunnel.value:
+                    try:
+                        self.lib.Bambu_Close(tunnel)
+                    except Exception:
+                        pass
+                    try:
+                        self.lib.Bambu_Destroy(tunnel)
+                    except Exception:
+                        pass
+                    tunnel.value = None
 
     def start(self):
         if not self._running:

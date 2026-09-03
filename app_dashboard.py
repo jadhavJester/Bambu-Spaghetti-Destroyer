@@ -67,8 +67,8 @@ except ImportError:
 
 
 def fetch_camera_frame() -> np.ndarray | None:
-    """Fetch camera frame via Cloud TUTK, local go2rtc, or direct port 6000."""
-    # 1. Primary: Cloud TUTK Streamer (Works seamlessly across Hotspot, 5G, and LAN)
+    """Fetch camera frame via Cloud TUTK or local go2rtc."""
+    # 1. Primary: Cloud TUTK Streamer (Works everywhere over internet)
     if get_cloud_streamer is not None:
         try:
             streamer = get_cloud_streamer()
@@ -78,9 +78,9 @@ def fetch_camera_frame() -> np.ndarray | None:
         except Exception:
             pass
 
-    # 2. Local go2rtc stream (when on home LAN)
+    # 2. Local go2rtc stream (when on home LAN with go2rtc active)
     try:
-        resp = requests.get("http://localhost:1984/api/frame.jpeg?src=bambu_camera", timeout=2)
+        resp = requests.get("http://localhost:1984/api/frame.jpeg?src=bambu_camera", timeout=1)
         if resp.status_code == 200 and len(resp.content) > 1000:
             arr = np.asarray(bytearray(resp.content), dtype=np.uint8)
             img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -88,18 +88,6 @@ def fetch_camera_frame() -> np.ndarray | None:
                 return img
     except Exception:
         pass
-
-    # 3. Direct LAN port 6000 fallback
-    if camera_stream is not None:
-        try:
-            host = os.environ.get("PRINTER_ADDRESS", "192.168.1.2")
-            code = os.environ.get("PRINTER_ACCESS_CODE", "ffd8e1e5")
-            raw = camera_stream.get_frame(host, code, wait_s=1.5)
-            if raw:
-                arr = np.asarray(bytearray(raw), dtype=np.uint8)
-                return cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        except Exception:
-            pass
 
     return None
 
