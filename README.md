@@ -27,19 +27,20 @@ This allows you to monitor, inspect, and protect your prints from **anywhere in 
   - Bypasses ISP Carrier-Grade NAT (CGNAT) and firewalls without requiring router port-forwarding or a VPN.
 - 🍝 **Real-Time YOLO AI Failure Detection**:
   - Powered by fine-tuned **YOLO** weights (`spaghetti_yolo.pt`) trained on **9,000+ real 3D print failures**.
-  - Identifies **Spaghetti** (detached filament / air printing), **Stringing** (whisker webs), and **Zits** (blob defects).
+  - Identifies **Spaghetti** (detached filament / air printing) and **Bed Separation** (detached/dislodged prints).
+  - Smart Filter: Cosmetic flaws (stringing & zits) are monitored but ignored so prints are never ruined unnecessarily.
 - 🛑 **Autonomous Cloud Emergency Pause**:
-  - Automatically issues a monotonic MQTT control packet to `us.mqtt.bambulab.com:8883` to pause extrusion immediately when failure confidence exceeds threshold (e.g., >70%).
+  - Automatically issues a monotonic MQTT control packet to `us.mqtt.bambulab.com:8883` to pause extrusion immediately when catastrophic failure confidence exceeds threshold (default $\ge$ 82%).
   - Saves an annotated proof photo (`failure_detected_<timestamp>.jpg`) with defect bounding boxes.
 - 📱 **Instant Telegram Failure Alerts with Proof Photos**:
   - Sends immediate notifications to your Telegram when an error occurs.
   - Formats defect name, AI confidence %, layer #, nozzle/bed temperatures, and emergency pause confirmation.
   - Attaches the single annotated camera frame with bounding boxes directly in the chat.
-- 🎛️ **Live Web Command Center Dashboard (`http://localhost:8787`)**:
-  - Modern glassmorphic dark UI.
-  - Live chamber camera stream with toggleable YOLO detection bounding boxes.
-  - Live thermal gauges (Nozzle & Heatbed °C).
-  - Print progress bar, current layer / total layers, and print state (`RUNNING`, `PAUSE`, `IDLE`).
+- 🎛️ **Live Bambu Studio / OrcaSlicer Command Center (`http://localhost:8787`)**:
+  - Native **15 FPS Fluid MJPEG Live Video Stream** with zero polling jitter.
+  - ⚙️ **In-Dashboard Settings Drawer**: Adjust failure sensitivity sliders (70%–95%), toggle auto-pause, and dispatch 1-click test alerts directly from the browser.
+  - Real-time thermal telemetry (Nozzle & Heatbed °C actual vs target).
+  - Print progress bar, active print job name, current layer / total layers, and single-spool filament monitor.
   - Remote manual controls: **⏸️ Pause**, **▶️ Resume**, and **⏹️ Stop Print**.
 
 ---
