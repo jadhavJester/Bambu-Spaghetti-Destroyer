@@ -20,16 +20,25 @@ ENV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 def load_env_vars() -> dict[str, str]:
     """Parse .env file for configuration."""
     vals = {}
-    if os.path.exists(ENV_FILE):
-        try:
-            with open(ENV_FILE, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#") and "=" in line:
-                        k, v = line.split("=", 1)
-                        vals[k.strip()] = v.strip().strip("\"'")
-        except Exception:
-            pass
+    candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "Chunnu", ".env"),
+    ]
+    for env_path in candidates:
+        if os.path.isfile(env_path):
+            try:
+                with open(env_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            vals[k.strip()] = v.strip().strip("\"'")
+            except Exception:
+                pass
+            if vals.get("TELEGRAM_BOT_TOKEN") and vals.get("TELEGRAM_CHAT_ID"):
+                break
+
     # Override with system environment if present
     for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
         if os.environ.get(k):
@@ -159,26 +168,82 @@ def send_telegram_alert(
         return False
 
 
+def auto_detect_chat_id(token: str) -> str | None:
+    """Listen for /start from the user to automatically get their Chat ID."""
+    print("\n[*] Listening for your message on Telegram...")
+    print("👉 Open Telegram, search for your bot, and tap START (or send /start)!")
+    t0 = time.time()
+    while time.time() - t0 < 30:
+        try:
+            resp = requests.get(f"https://api.telegram.org/bot{token}/getUpdates", timeout=5).json()
+            if resp.get("ok") and resp.get("result"):
+                for update in reversed(resp["result"]):
+                    msg = update.get("message") or update.get("channel_post")
+                    if msg and "chat" in msg:
+                        cid = str(msg["chat"]["id"])
+                        user_name = msg["chat"].get("first_name", "") or msg["chat"].get("username", "")
+                        print(f"[+] Found chat from '{user_name}'! Detected Chat ID: {cid}")
+                        return cid
+        except Exception:
+            pass
+        time.sleep(1.5)
+    return None
+
+
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "setup":
-        print("--- Telegram Bot Configuration ---")
-        token = input("Enter your Telegram Bot Token (from @BotFather): ").strip()
-        chat_id = input("Enter your Telegram Chat ID (from @userinfobot): ").strip()
-        if token and chat_id:
+    cfg = load_env_vars()
+    token = cfg.get("TELEGRAM_BOT_TOKEN")
+    chat_id = cfg.get("TELEGRAM_CHAT_ID")
+
+    if not token:
+        print("--- Telegram Bot Setup ---")
+        token = input("Enter your Telegram Bot Token: ").strip()
+        if not token:
+            print("Token cannot be empty!")
+            sys.exit(1)
+
+    # Test bot info
+    try:
+        bot_info = requests.get(f"https://api.telegram.org/bot{token}/getMe", timeout=8).json()
+        if not bot_info.get("ok"):
+            print(f"[!] Invalid bot token: {bot_info}")
+            sys.exit(1)
+        bot_user = bot_info["result"].get("username", "")
+        print(f"[+] Connected to Bot: @{bot_user} ({bot_info['result'].get('first_name')})")
+    except Exception as e:
+        print(f"[!] Failed to contact Telegram API: {e}")
+        sys.exit(1)
+
+    # If chat_id not set, auto-detect
+    if not chat_id:
+        chat_id = auto_detect_chat_id(token)
+        if chat_id:
             save_telegram_config(token, chat_id)
-            print("[*] Testing alert...")
-            # Create a test sample image
-            test_img = np.zeros((400, 600, 3), dtype=np.uint8)
-            cv2.putText(test_img, "Bambu Sentinel Test Alert", (40, 200), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
-            send_telegram_alert(test_img, error_type="Test Alert", confidence=0.99, layer_num=42, total_layers=100)
-    else:
-        cfg = load_env_vars()
-        if not cfg.get("TELEGRAM_BOT_TOKEN") or not cfg.get("TELEGRAM_CHAT_ID"):
-            print("Telegram is not configured yet!")
-            print("Run: python telegram_alert.py setup")
         else:
-            print(f"Telegram configured! Bot token: {cfg['TELEGRAM_BOT_TOKEN'][:6]}... | Chat ID: {cfg['TELEGRAM_CHAT_ID']}")
-            print("Sending test alert...")
-            test_img = np.zeros((400, 600, 3), dtype=np.uint8)
-            cv2.putText(test_img, "Sentinel System Online", (70, 200), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
-            send_telegram_alert(test_img, error_type="Diagnostic Test", confidence=1.0, layer_num=1, total_layers=100)
+            print("[!] Did not receive a message in time.")
+            sys.exit(1)
+
+    print(f"[*] Testing alert to Chat ID: {chat_id}...")
+    test_img = np.zeros((400, 600, 3), dtype=np.uint8)
+    cv2.putText(test_img, "Bambu Sentinel Online", (50, 180), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+    cv2.putText(test_img, "Test Failure Alert", (50, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+    
+    ok = send_telegram_alert(
+        photo=test_img,
+        error_type="Diagnostic System Test",
+        confidence=0.985,
+        layer_num=42,
+        total_layers=1005,
+        nozzle_temp=240.0,
+        bed_temp=70.0,
+        action_taken="Test Simulation (No real pause)",
+    )
+
+    if not ok:
+        print("\n[!] The alert failed because your bot cannot message you yet.")
+        print(f"👉 Please open https://t.me/{bot_user} in Telegram and click START!")
+        print("Let's detect your chat automatically:")
+        new_cid = auto_detect_chat_id(token)
+        if new_cid:
+            save_telegram_config(token, new_cid)
+            send_telegram_alert(test_img, error_type="Diagnostic Test", confidence=1.0, layer_num=42, total_layers=1005)
