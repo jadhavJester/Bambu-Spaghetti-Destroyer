@@ -65,6 +65,11 @@ try:
 except ImportError:
     get_cloud_streamer = None
 
+try:
+    from telegram_alert import send_telegram_alert
+except ImportError:
+    send_telegram_alert = lambda *args, **kwargs: False
+
 
 def fetch_camera_frame() -> np.ndarray | None:
     """Fetch camera frame via Cloud TUTK or local go2rtc."""
@@ -130,11 +135,30 @@ async def ai_monitor_loop():
                 if is_failure and AUTO_PAUSE:
                     # Log event & Trigger Pause
                     ts_str = time.strftime("%H:%M:%S")
-                    msg = f"Spaghetti/Defect detected ({max_conf:.1%}) -> Emergency Pause Triggered!"
+                    defect_str = ", ".join([d["name"] for d in detections]) or "Spaghetti Failure"
+                    msg = f"{defect_str} detected ({max_conf:.1%}) -> Emergency Pause Triggered!"
                     AI_LOGS.insert(0, {"time": ts_str, "type": "danger", "msg": msg})
                     if len(AI_LOGS) > 30:
                         AI_LOGS.pop()
                     ctrl.pause_print()
+
+                    # Send Telegram Notification with Annotated Proof Photo
+                    try:
+                        stat = ctrl.get_status()
+                        ok = send_telegram_alert(
+                            photo=annotated,
+                            error_type=defect_str,
+                            confidence=max_conf,
+                            layer_num=stat.get("layer_num", 0),
+                            total_layers=stat.get("total_layers", 0),
+                            nozzle_temp=stat.get("nozzle_temp", 0.0),
+                            bed_temp=stat.get("bed_temp", 0.0),
+                            action_taken="Print Paused Automatically via Cloud MQTT",
+                        )
+                        if ok:
+                            AI_LOGS.insert(0, {"time": ts_str, "type": "info", "msg": "Telegram alert & proof photo delivered!"})
+                    except Exception as tg_err:
+                        print(f"[Telegram Alert Error]: {tg_err}", flush=True)
 
         except Exception as e:
             # print(f"Monitor loop error: {e}")

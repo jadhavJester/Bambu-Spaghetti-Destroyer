@@ -138,7 +138,24 @@ class SpaghettiDetector:
                     # 2. Save proof image
                     fail_img_path = f"failure_detected_{int(time.time())}.jpg"
                     cv2.imwrite(fail_img_path, annotated)
-                    print(f"[+] Proof image saved to {fail_img_path}\n", flush=True)
+                    print(f"[+] Proof image saved to {fail_img_path}", flush=True)
+                    
+                    # 3. Send Telegram Alert with Annotated Proof Photo
+                    try:
+                        from telegram_alert import send_telegram_alert
+                        defect_str = ", ".join(detections) or "Spaghetti Failure"
+                        send_telegram_alert(
+                            photo=annotated,
+                            error_type=defect_str,
+                            confidence=conf,
+                            layer_num=layer,
+                            total_layers=total_l,
+                            nozzle_temp=nozzle,
+                            bed_temp=bed,
+                            action_taken="Print Paused Automatically via Cloud MQTT",
+                        )
+                    except Exception as e:
+                        print(f"[!] Telegram notification error: {e}", flush=True)
                     
                 else:
                     det_str = ", ".join(detections) if detections else "No defects"

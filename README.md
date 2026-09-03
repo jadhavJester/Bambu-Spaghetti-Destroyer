@@ -28,6 +28,10 @@ Unlike local-only camera bridges that stop working the moment your laptop leaves
 - 🛑 **Autonomous Cloud Emergency Pause**:
   - Automatically sends a monotonic MQTT control packet to `us.mqtt.bambulab.com:8883` to pause extrusion immediately when failure confidence exceeds threshold (e.g. >70%).
   - Saves an annotated proof photo (`failure_detected_<timestamp>.jpg`) with bounding boxes.
+- 📱 **Instant Telegram Failure Alerts with Proof Photos**:
+  - Delivers real-time notifications to your Telegram when an error occurs.
+  - Includes defect name, AI confidence %, layer #, nozzle/bed temperatures, and emergency pause confirmation.
+  - Attaches the exact annotated camera frame with failure bounding boxes.
 - 🎛️ **Live Web Command Center Dashboard (`http://localhost:8787`)**:
   - Modern glassmorphic dark UI.
   - Live chamber camera stream with toggleable YOLO detection bounding boxes.
