@@ -207,3 +207,7 @@ If you want to train or fine-tune YOLO on specific filaments or camera angles:
 
 ## 📄 License
 MIT License. Open source and free for personal and commercial 3D printing operations!
+
+## License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
